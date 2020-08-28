@@ -1,18 +1,42 @@
-﻿<!DOCTYPE html>
-
-<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
+﻿<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
 <head>
     <style>
         body {
             background-color: dimgray !important;
+            font-size: 12px;
         }
 
         div {
-            padding: 10px;
+            padding: 5px;
+        }
+
+        .footer {
+            width: 580px;
+            position: absolute;
+            bottom: 10px;
+            height: 125px;
+            overflow: hidden;
+        }
+
+        .header {
+            width: 580px;
+            position: absolute;
+            top: 0px;
+            height: 500px;
+            overflow: hidden;
+        }
+
+        #labor {
+            position: absolute;
+            top: 500px;
+            width: 580px;
+            bottom: 125px;
+            overflow: auto;
         }
 
         .MainContent {
-            max-width: 400px;
+            width: 600px;
+            height: 100%;
             margin: auto;
             padding: 10px;
             background-color: white;
@@ -20,42 +44,41 @@
 
         /*=========== Element Styles ===========*/
         /*Classes*/
-        .header {
-            background-color: black;
-            color: white;
-        }
-
         .hide {
             display: none !important;
         }
 
         .highMpwr::after {
-            content: "Seems High";
+            content: " Seems High";
             color: red;
         }
 
         .invalidEnd::after {
-            content: "*End Date must be after Start Date";
+            content: " *End Date must be after Start Date";
             color: red;
         }
 
         .invalidStart::after {
-            content: "*Start Date must be before Today";
+            content: " *Start Date must be before Today";
             color: red;
         }
 
         .invalidDay::after {
-            content: "*Must be a Monday";
+            content: " *Must be a Monday";
             color: red;
         }
 
         .logo {
-            text-align: center;
-            color: rgb(227, 112, 39);
-            font-weight: bold;
-            font-style: italic;
-            font-size: 28pt;
+            background-color: black;
+            color: white;
         }
+
+            .logo h2 {
+                text-align: center;
+                color: rgb(227, 112, 39);
+                font-weight: bold;
+                font-style: italic;
+            }
 
         .negMpwr {
             color: red;
@@ -65,10 +88,6 @@
         .posMpwr {
             color: green;
             font-weight: bold;
-        }
-
-        .show {
-            display: block !important;
         }
 
         .spaced {
@@ -105,7 +124,7 @@
         //Luxon Global Object
         let DateTime = luxon.DateTime;
 
-        //===== Obtain Temp Key
+        //===== Obtain Temp Auth Key
         function getTempAuth(dbid, callback) {
             var headers = {
                 'QB-Realm-Hostname': 'domain.quickbase.com',
@@ -123,14 +142,13 @@
                     typeof (callback) === "function" ? callback(xmlHttp.responseText) : alert("Callback not a function. Inform Brandon Drake \n(ext. 266)");
                 }
             };
-            xmlHttp.withCredentials = true
+            xmlHttp.withCredentials = true;
             //xmlHttp.send();
         }
 
         //===== Quick Base API to add records
         function AddRecords(records, recordID, dbid) {
-            console.log(JSON.stringify(records));
-            dbid?getTempAuth(dbid, function (response) {
+            dbid ? getTempAuth(dbid, function (response) {
                 var parse = JSON.parse(response);
                 var token = parse.temporaryAuthorization;
 
@@ -160,7 +178,7 @@
                     }
                 };
                 //xmlHttp.send(JSON.stringify(body));
-            }):alert("Error finding table. Please contact Brandon Drake \n(ext. 266)");
+            }) : alert("Error finding table. Please contact Brandon Drake \n(ext. 266)");
         }
 
         //===== Disply Opp Info
@@ -171,7 +189,7 @@
             let oppConstStart = hash.split("_")[1];
 
             //Set Opp Information
-            if (oppConstStart) { $("#date_beginning").val(oppConstStart) };
+            if (oppConstStart && oppConstStart != "notSet") { $("#date_beginning").val(oppConstStart) };
             $("#oppName").text(decodeURIComponent(oppName));
             $("#oppDesc").text(decodeURIComponent(oppDesc));
         }
@@ -187,25 +205,25 @@
                 while (startDate <= endDate) {
                     //Date Attributes
                     let dateDisplay = document.createElement("label");
-                        dateDisplay.id = "D" + weekCounter;
-                        dateDisplay.innerHTML = startDate.toLocaleString();
-                        dateDisplay.setAttribute("name", startDate.toISODate());
-                        dateDisplay.setAttribute("for", "M" + weekCounter);
+                    dateDisplay.id = "D" + weekCounter;
+                    dateDisplay.innerHTML = startDate.toLocaleString();
+                    dateDisplay.setAttribute("name", startDate.toISODate());
+                    dateDisplay.setAttribute("for", "M" + weekCounter);
                     //Manpower Element Attributes
                     let manpwrInput = document.createElement("input");
-                        manpwrInput.setAttribute("class", "form-control");
-                        manpwrInput.type = "number";
-                        manpwrInput.id = "M" + weekCounter;
-                        manpwrInput.setAttribute("onchange", "checkEntry(this.value, this.id)");
+                    manpwrInput.setAttribute("class", "form-control");
+                    manpwrInput.type = "number";
+                    manpwrInput.id = "M" + weekCounter;
+                    manpwrInput.setAttribute("onchange", "checkEntry(this.value, this.id)");
                     let highMpwr = document.createElement("span");
-                        highMpwr.className = "highMpwr hide warning";
+                    highMpwr.className = "highMpwr hide warning";
                     // Place Elements
                     let divNode = document.createElement("div");
-                        divNode.setAttribute("class", "week");
-                        divNode.id = "W" + weekCounter;
-                        divNode.appendChild(dateDisplay);
-                        divNode.appendChild(manpwrInput);
-                        divNode.appendChild(highMpwr);
+                    divNode.setAttribute("class", "week");
+                    divNode.id = "W" + weekCounter;
+                    divNode.appendChild(dateDisplay);
+                    divNode.appendChild(manpwrInput);
+                    divNode.appendChild(highMpwr);
 
                     //Add to weeks
                     document.getElementById("weeks").appendChild(divNode);
@@ -220,8 +238,10 @@
                 if ($("#evenSplit").is(":checked")) { setEqualMpwr(weekCounter) };
 
                 //Display Results
-                $("#labor").attr("class", "show");
-                $("#addWeeks").attr("class", "hide");
+                $("#labor").removeClass("hide");
+                $("#finishBtn").removeClass("hide");
+                $("#addWeeks").addClass("hide");
+                $("#updateWeeks").addClass("hide");
 
                 //Get new totals (if any)
                 getMpwrTotal();
@@ -242,24 +262,25 @@
 
             // Start check
             if (invalidStart && startIsMonday) {
-                $("#start p.invalidStart").length ? "" : $("#start").append("<p class=invalidStart></p>");
+                $("#start span.invalidStart").length ? "" : $("#start label").append("<span class=invalidStart></span>");
             } else {
-                $("#start p.invalidStart").remove() }
+                $("#start span.invalidStart").remove()
+            }
 
             // End check
             if (invalidEnd && endIsMonday) {
-                $("#end p.invalidEnd").length ? "" : $("#end").append("<p class=invalidEnd></p>");
-            } else { $("#end p.invalidEnd").remove() }
+                $("#end span.invalidEnd").length ? "" : $("#end label").append("<span class=invalidEnd></span>");
+            } else { $("#end span.invalidEnd").remove() }
 
             //Start not a Monday
             if (!startIsMonday) {
-                $("#start p.invalidDay").length ? "" : $("#start").append("<p class=invalidDay></p>");
-            } else { $("#start p.invalidDay").remove() }
+                $("#start span.invalidDay").length ? "" : $("#start label").append("<span class=invalidDay></span>");
+            } else { $("#start span.invalidDay").remove() }
 
             //End not a Monday
             if (!endIsMonday) {
-                $("#end p.invalidDay").length ? "" : $("#end").append("<p class=invalidDay></p>");
-            } else { $("#end p.invalidDay").remove() }
+                $("#end span.invalidDay").length ? "" : $("#end label").append("<span class=invalidDay></span>");
+            } else { $("#end span.invalidDay").remove() }
 
 
             return (invalidStart || invalidEnd || !startIsMonday || !endIsMonday)
@@ -284,8 +305,8 @@
                     } else { week.val(weeklyMpwr); }
                 }
             } else {
-                $("#noSplit").addClass("show").removeClass("hide");
-                setTimeout(function () { $("#noSplit").addClass("hide").removeClass("show"); }, 5000);
+                $("#noSplit").removeClass("hide");
+                setTimeout(function () { $("#noSplit").addClass("hide"); }, 5000);
                 $("#evenSplit").prop("checked", false);
             }
         }
@@ -296,8 +317,8 @@
             let re = new RegExp(/\d{4}-\w{2}-\d+/);
             let isOpp = re.test(recordID);
             let records = [];
-            let keyField = isOpp?"7":"";
-            let dbid = "dbid";
+            let keyField = isOpp ? "7" : "";
+            let dbid = "";
 
             $(".week").each(function (index) {
                 let date = $("#D" + index).attr("name");
@@ -311,16 +332,16 @@
             })
 
             if (!getMpwrTotal()) {
-                window.scrollTo(0, 0);
-                $("#mpwrMismatch").addClass("show").removeClass("hide");
+                //window.scrollTo(0, 0);
+                $("#mpwrMismatch").removeClass("hide");
             } else { AddRecords(records, recordID, dbid) };
         }
 
         //===== Check Mpwr Entry for large values
         function checkEntry(value, id) {
             parseInt(value) < 30
-                ?$("#" + id).siblings(".highMpwr").removeClass("show").addClass("hide")
-                :$("#" + id).siblings(".highMpwr").removeClass("hide").addClass("show").val("Seems High");
+                ? $("#" + id).siblings(".highMpwr").addClass("hide")
+                : $("#" + id).siblings(".highMpwr").removeClass("hide").val("Seems High");
 
             getMpwrTotal();
         }
@@ -335,21 +356,21 @@
             let mpwrJQ = $("#hours");
             let remainJQ = $("#hoursRemaining");
 
-            $(".week" ).each(function (index) {
+            $(".week").each(function (index) {
                 let mpwr = Math.round($("#M" + index).val());
                 totalMpwr += mpwr;
             });
 
 
             //Set New Values
-            mpwrRemain = mpwrNeeded > 0 ? totalMpwr - mpwrNeeded:0;
+            mpwrRemain = mpwrNeeded > 0 ? totalMpwr - mpwrNeeded : 0;
             mpwrJQ.text(totalMpwr);
             mpwrRemain === 0
                 ? remainJQ.attr("class", "posMpwr").text("Hours Match: " + mpwrRemain)
                 : remainJQ.attr("class", "negMpwr").text("Hours Difference: " + mpwrRemain);
 
             //UI Clean-up
-            if ($("#mpwrMismatch").hasClass("show")) { $("#mpwrMismatch").addClass("hide").removeClass("show") };
+            if (!$("#mpwrMismatch").hasClass("hide")) { $("#mpwrMismatch").addClass("hide") };
 
             return mpwrRemain === 0 || mpwrNeeded <= 0;
         }
@@ -358,24 +379,26 @@
         function updateWeeks() {
             $(".week").remove();
             genWeeksBegin();
-            $("#updateWeeks").attr("class", "hide");
+            getMpwrTotal;
         }
 
         //===== Display Update Weeks Button if any field changes
         function showUpdate() {
-            $("#labor").attr("class", "hide");
-            $("#addWeeks").hasClass("hide") ? $("#updateWeeks").attr("class", "show") : "";
+            $("#labor").addClass("hide");
+            $("#finishBtn").addClass("hide");
+            $("#addWeeks").hasClass("hide") ? $("#updateWeeks").removeClass("hide") : "";
         }
 
         //===== Clear All Data
         function clearWeeks() {
             $(".week").remove();
-            $("#date_beginning").val("");
-            $("#date_ending").val("");
-            $("#totalMpwr").val("");
+            $("#date_beginning, #date_ending, #totalMpwr").val("");
             $("#evenSplit").prop("checked", false);
-            $("#labor").attr("class", "hide");
-            $("#addWeeks").attr("class", "show");
+            $("#labor, #finishBtn, #updateWeeks").addClass("hide");
+            $("#addWeeks").removeClass("hide");
+            $("#start p.invalidStart, span.invalidEnd, span.invalidDay").remove();
+            $("#end p.invalidStart, span.invalidEnd, span.invalidDay").remove();
+            $("#hoursRemaining, #hours").text("");
         }
 
         //===== Updates the Modal Window to inform User of status
@@ -402,12 +425,73 @@
         function goBack() {
             window.history.go(-1);
         }
-
     </script>
 </head>
 
 <body onload="displayOppInfo()">
     <div class="MainContent">
+        <!--Opp Information and Header-->
+        <div class="header">
+            <div class="logo">
+                <h2>Janotta &amp; Herner</h2>
+                <div>
+                    <h5>Labor Projections For:</h5>
+                    <span id="oppName"></span> <br />
+                    <span id="oppDesc"></span>
+                </div>
+            </div>
+            <!--Begin User Input and Control-->
+            <div id="start">
+                <label for="date_beginning">Date Beginning</label>
+                <input class="form-control col-md-8" onchange="showUpdate()" type="date" id="date_beginning" value="2020-10-05" /><!--value="2020-10-05"-->
+            </div>
+            <div id="end">
+                <label for="date_ending">Date Ending</label>
+                <input type="date" class="form-control col-md-8" onchange="showUpdate()" id="date_ending" value="2020-10-26" /><!--value="2020-10-26"-->
+            </div>
+            <div id="mpwr">
+                <label for="totalMpwr">Total Manpower Needed</label>
+                <input type="number" class="form-control col-md-8" id="totalMpwr" onchange="getMpwrTotal()" value="12" /><!--value="12"-->
+            </div>
+            <div id="genDatesButton">
+                <input type="checkbox" onchange="showUpdate()" id="evenSplit" />
+                <label for="evenSplit">Split Evenly</label>
+                <span id="noSplit" class="warning hide">Cannot Split to whole #'s: Enter Manually</span>
+                <div id="addWeeks">
+                    <button type="button" class="btn btn-primary" onclick="genWeeksBegin()">Generate Labor Schedule</button>
+                </div>
+                <div id="updateWeeks" class="hide">
+                    <button type="button" class="btn btn-warning" onclick="updateWeeks()">Update Labor Schedule</button>
+                </div>
+            </div>
+            <hr />
+            <h3>Week Begin</h3>
+        </div>
+        <!--Manpower Totals and Comparison Info-->
+        <div id="labor" class="hide">
+            <div id="beginDates">
+                <!--Container to place all generated weeks-->
+                <div class="col-md-8" id="weeks">
+                </div>
+            </div>
+        </div>
+        <!--Clear and cancel options-->
+        <div id="clearCancel" class="footer">
+            <div id="mpwrComparison">
+                <div>
+                    <span>Total Hours: <span id="hours"></span></span>
+                    <span id="hoursRemaining"></span>
+                </div>
+                <div id="mpwrMismatch" class="warning hide">
+                    <span>Manpower totals do not match</span>
+                </div>
+            </div>
+            <div id="footerbuttons">
+                <button id="finishBtn" type="button" class="btn btn-success hide" onclick="genUpsert()">Upload Schedule</button>
+                <button id="clearBtn" type="button" class="btn btn-warning" onclick="clearWeeks()">Clear</button>
+                <button id="cancelBtn" type="button" class="btn btn-danger" onclick="goBack()">Cancel</button>
+            </div>
+        </div>
         <!--Modal Popup On Submission and Response-->
         <div id="loadScreen" class="modal fade" role="dialog">
             <div class="modal-dialog">
@@ -423,64 +507,6 @@
                     </div>
                 </div>
             </div>
-        </div>
-        <!--Opp Information and Header-->
-        <div class="header">
-            <div class="logo">
-                <span>Janotta &amp; Herner</span>
-            </div>
-            <div>
-                <span><strong>Labor Projections For:</strong></span> <br />
-                <span id="oppName"></span> <br />
-                <span id="oppDesc"></span>
-            </div>
-        </div>
-        <!--Begin User Input and Control-->
-        <div id="start">
-            <label for="date_beginning">Date Beginning</label>
-            <input class="form-control col-md-8" onchange="showUpdate()" type="date" id="date_beginning" value="2020-10-05" /><!--value="2020-10-05"-->
-        </div>
-        <div id="end">
-            <label for="date_ending">Date Ending</label>
-            <input type="date" class="form-control col-md-8" onchange="showUpdate()" id="date_ending" value="2020-10-26" /><!--value="2020-10-26"-->
-        </div>
-        <div id="mpwr">
-            <label for="totalMpwr">Total Manpower Needed</label>
-            <input type="number" class="form-control col-md-8" id="totalMpwr" onchange="getMpwrTotal()" value="12" /><!--value="12"-->
-        </div>
-        <div id="genDatesButton" class="show">
-            <input type="checkbox" onchange="showUpdate()" id="evenSplit" />
-            <label for="evenSplit">Split Evenly</label>
-            <p> <span id="noSplit" class="warning hide">Cannot Split - Manpower < Total Weeks: <br /> Enter Manually</span> </p>
-            <span id="addWeeks" class="show">
-                <button type="button" class="btn btn-primary" onclick="genWeeksBegin()">Generate Labor Schedule</button>
-            </span>
-            <span id="updateWeeks" class="hide">
-                <button type="button" class="btn btn-warning" onclick="updateWeeks()">Update Labor Schedule</button>
-            </span>
-        </div>
-        <hr />
-        <!--Manpower Totals and Comparison Info-->
-        <div id="labor" class="hide">
-            <div id="mpwrComparison">
-                <h3>Week Begin</h3>
-                <div>Total Hours: <span id="hours"></span></div>
-                <div><span id="hoursRemaining"></span></div>
-                <div id="mpwrMismatch" class="warning hide"><span>Manpower totals do not match</span></div>
-            </div>
-            <div id="beginDates">
-                <!--Container to place all generated weeks-->
-                <div class="form-group col-md-8" id="weeks">
-                </div>
-                <div>
-                    <button id="finishBtn" type="button" class="btn btn-success" onclick="genUpsert()">Upload Schedule</button>
-                </div>
-            </div>
-        </div>
-        <!--Clear and cancel options-->
-        <div id="clearCancel">
-            <button id="clearBtn" type="button" class="btn btn-warning" onclick="clearWeeks()">Clear</button>
-            <button id="cancelBtn" type="button" class="btn btn-danger" onclick="goBack()">Cancel</button>
         </div>
     </div>
 </body>
