@@ -410,7 +410,7 @@
             }
             if (status >= 200 && status < 400) {
                 message.text("Loaded Sucessfully. Navigating to Opportunity");
-                setTimeout(3000, window.location = "/db/bpmpd3j7p?a=dr&key=" + recordID); //redirect to opportunity in QB
+                setTimeout(3000, window.location = "/db/dbid?a=dr&key=" + recordID); //redirect to opportunity in QB
             } else if (failCounter === 0) {
                 message.text("Loading Failed. Click outside this box to update or retry");
                 failCounter++;
