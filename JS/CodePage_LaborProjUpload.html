@@ -1,49 +1,37 @@
 ﻿<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
 <head>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <style>
         body {
-            background-color: dimgray !important;
             font-size: 12px;
         }
 
-        div {
-            padding: 5px;
-        }
-
-        .footer {
-            width: 580px;
-            position: absolute;
-            bottom: 10px;
-            height: 125px;
-            overflow: hidden;
-        }
-
         .header {
-            width: 580px;
-            position: absolute;
-            top: 0px;
-            height: 500px;
+            width: 100%;
+            margin: auto;
+            max-height: 275px;
             overflow: hidden;
+            color: white;
+            background-color: black;
         }
 
         #labor {
-            position: absolute;
-            top: 500px;
-            width: 580px;
-            bottom: 125px;
+            margin-left: 5px;
+            top: 275px;
             overflow: auto;
         }
 
         .MainContent {
-            width: 600px;
             height: 100%;
-            margin: auto;
-            padding: 10px;
             background-color: white;
         }
 
         /*=========== Element Styles ===========*/
         /*Classes*/
+        .footer {
+            margin: 10px;
+        }
+
         .hide {
             display: none !important;
         }
@@ -59,7 +47,7 @@
         }
 
         .invalidStart::after {
-            content: " *Start Date must be before Today";
+            content: " *Start Date must be on or after Today";
             color: red;
         }
 
@@ -69,12 +57,11 @@
         }
 
         .logo {
-            background-color: black;
-            color: white;
+            margin-bottom: 25px;
+            text-align: center;
         }
 
             .logo h2 {
-                text-align: center;
                 color: rgb(227, 112, 39);
                 font-weight: bold;
                 font-style: italic;
@@ -94,11 +81,34 @@
             white-space: pre-line;
         }
 
+        .staticinput {
+            padding-left: 3px;
+            display: inline-block;
+            color: white;
+        }
+
         .warning {
             color: red;
         }
 
+        .week {
+            margin: 3px;
+            display: inline-block;
+            vertical-align: middle;
+            overflow: auto;
+        }
+
+        .addWeekBtn {
+            margin: 3px;
+            display: inline-block;
+            overflow: auto;
+        }
+
         /*ID's*/
+        #lbrResults {
+            margin-left:30%;
+            margin-bottom: 20px;
+        }
         #mpwrMismatch {
             color: red;
         }
@@ -106,100 +116,688 @@
         #noSplit {
             color: red;
         }
+
+        #updateWeeks {
+            padding: 10px;
+        }
     </style>
 
     <script src="https://cdn.jsdelivr.net/npm/luxon@1.24.1/build/global/luxon.min.js"></script>
     <script src="https://code.jquery.com/jquery-3.5.1.min.js"
             integrity="sha256-9/aliU8dGd2tb6OSsuzixeV4y/faTqgFtohetphbbj0="
             crossorigin="anonymous"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.11.0/umd/popper.min.js"></script>
     <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
     <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css"
           integrity="sha384-JcKb8q3iqJ61gNV9KGb8thSsNjpSL0n8PARn9HuZOnIxN0hoP+VmmDGMN5t9UJ0Z"
           crossorigin="anonymous">
 
-
     <meta charset="utf-8" />
-    <title>Labor Projections Upload</title>
+    <title>Labor Projections Update</title>
     <script>
-        //Luxon Global Object
-        let DateTime = luxon.DateTime;
+        //Globals
+        var DateTime = luxon.DateTime;
+        var today = DateTime.local();
+        var laborToken = "";
+        var oppToken = "";
+        var jobToken = "";
+        var tokenRuns = 0;
+        var currRecKey = "";
+        var inTestEnv = window.location.href.startsWith("http://localhost");
+        var tokenUpdate = setInterval(getAllTokens, 270000);
+        var lastWeekBegin = "";
+        var currWeeks = [];
 
-        //===== Obtain Temp Auth Key
-        function getTempAuth(dbid, callback) {
+        //===== Handle Promise Errors
+        function handleError(response, promise) {
+            if (!response.ok) {
+                throw Error("Issues obtaining required information from " + promise + ". Contact Brandon Drake and provide this information");
+            }
+
+            return response;
+        }
+        //===== Obtain all initial tokens GTG
+        async function getAllTokens() {
             var headers = {
-                'QB-Realm-Hostname': 'domain.quickbase.com',
-                'QB-App-Token': '',
+                'QB-Realm-Hostname': '',
                 'Content-Type': 'application/json'
             }
 
-            const xmlHttp = new XMLHttpRequest();
-            xmlHttp.open('GET', 'https://api.quickbase.com/v1/auth/temporary/' + dbid, true);
-            for (const key in headers) {
-                xmlHttp.setRequestHeader(key, headers[key]);
+            var params = {
+                method: 'GET',
+                headers: headers,
+                credentials: 'include'
             }
-            xmlHttp.onreadystatechange = function () {
-                if (xmlHttp.readyState === XMLHttpRequest.DONE) {
-                    typeof (callback) === "function" ? callback(xmlHttp.responseText) : alert("Callback not a function. Inform Brandon Drake \n(ext. 266)");
+
+            if (inTestEnv) {
+                getRecordList("");
+            } else {
+                if (tokenRuns < 11) {
+                    tokenRuns++;
+                    const getTokens = [
+                        fetch('https://api.quickbase.com/v1/auth/temporary/', params), //Labor Table
+                        fetch('https://api.quickbase.com/v1/auth/temporary/', params), //Opportunity Table
+                        fetch('https://api.quickbase.com/v1/auth/temporary/', params)  //Jobs Table
+                    ];
+                    let res = await Promise.all(getTokens);
+
+                    let keys = await Promise.all(res.map(res => res.json())).then(keyArray => keyArray.map(key => key.temporaryAuthorization));
+
+                    laborToken = keys[0];
+                    oppToken = keys[1];
+                    jobToken = keys[2];
+                    getRecordList();
+                } else {
+                    clearInterval(tokenUpdate);
+                    $("#clearBtn").addClass("hide");
+                    $("#refreshPageBtn").removeClass("hide");
+                    $("#loadScreen").modal("toggle");
+                    modalUpdate("999", "Idle for too Long. Please 'Refresh' or 'Exit' the page");
                 }
+            }
+        }
+
+        //*** NOT IN USE *** Obtain Labor Projection App Temp Key
+        // Seems unnecessary at this moment in development
+        async function getNextRecId() {
+            var tknheaders = {
+                'QB-Realm-Hostname': '',
+                'Content-Type': 'application/json'
+            }
+
+
+            var token = await fetch('https://api.quickbase.com/v1/auth/temporary/',
+                {
+                    method: 'GET',
+                    headers: tknheaders,
+                    credentials: 'include'
+                })
+                .then(res => res.json().then(res => res.temporaryAuthorization))
+                .catch(err => console.log(err));
+
+            var tableheaders = {
+                'QB-Realm-Hostname': '',
+                'Authorization': 'QB-TEMP-TOKEN ' + token,
+                'Content-Type': 'application/json'
+            }
+
+
+            fetch('https://api.quickbase.com/v1/tables/?appId=',
+                {
+                    method: 'GET',
+                    headers: tableheaders,
+                })
+                .then(handleError)
+                .then(res => res.json().then(res => { return res.nextRecordId }))
+                .catch(err => console.log(err))
+        }
+
+        //===== GET User Opportunities GTG
+        async function getRecordList() {
+            var oppHeaders = {
+                'QB-Realm-Hostname': '',
+                'Authorization': 'QB-TEMP-TOKEN ' + oppToken,
+                'Content-Type': 'application/json'
+            }
+
+            var oppParams = {
+                'method': 'POST',
+                'headers': oppHeaders
             };
-            xmlHttp.withCredentials = true;
-            //xmlHttp.send();
+
+            var jobHeaders = {
+                'QB-Realm-Hostname': '',
+                'Authorization': 'QB-TEMP-TOKEN ' + jobToken,
+                'Content-Type': 'application/json'
+            }
+
+            var jobParams = {
+                'method': 'POST',
+                'headers': jobHeaders
+            };
+
+            let recList = [];
+
+            let parseRec = function (results, type) {
+                for (rec in results) {
+                    let proxyID = type === "opp" ? 94 : 185;
+                    let durationID = type === "opp" ? 235 : 512;
+                    let obj = {}
+                    obj = { "proxy": results[rec][proxyID].value, "duration": results[rec][durationID].value };
+                    recList.push(obj);
+                }
+            }
+
+            //Generate Report URL
+            let reportID = $("input[name='searchType']:checked").attr("value");
+
+            let oppReportID = reportID === 'user' ? 68 : 76;
+            let jobReportID = reportID === 'user' ? 108 : 109;
+
+            let oppURL = "https://api.quickbase.com/v1/reports/" + oppReportID + "/run?tableId=";
+            let jobURL = "https://api.quickbase.com/v1/reports/" + jobReportID + "/run?tableId=";
+
+            inTestEnv
+                ? recList =
+                [
+                    {
+                        "proxy": "2020-100 - Test Job",
+                        "duration": "23"
+                    },
+                    {
+                        "proxy": "2020-ST-103 -  Morel Landscaping LLC",
+                        "duration": "4"
+                    },
+                    {
+                        "proxy": "2020-ST-102 - Ohio Farmers Insurance Group"
+                        ,
+                        "duration": "4"
+                    },
+                    {
+                        "proxy": "2020-JH-147 - Adler Pelzer Group"
+                        ,
+                        "duration": "4"
+                    },
+                    {
+                        "proxy": "2020-JH-143 - Firelands Regional Medical Center"
+                        ,
+                        "duration": "4"
+                    },
+                    {
+                        "proxy": "2020-JH-142 - Firelands Regional Medical Center"
+                        ,
+                        "duration": "4"
+                    },
+                    {
+                        "proxy": "2020-JH-138 - Croghan Colonial Bank"
+                        ,
+                        "duration": "4"
+                    },
+                    {
+                        "proxy": "2020-JH-137 - NAMSA Inc."
+                        ,
+                        "duration": "4"
+                    },
+                    {
+                        "proxy": "2020-JH-136 - Norplas Industries, Inc."
+                        ,
+                        "duration": "4"
+                    },
+                    {
+                        "proxy": "2020-JH-135 - Beck Suppliers Inc."
+                        ,
+                        "duration": "4"
+                    },
+                    {
+                        "proxy": "2020-JH-134 - American Timber & Steel"
+                        ,
+                        "duration": "4"
+                    },
+                    {
+                        "proxy": "2020-JH-131 - Norplas Industries, Inc."
+                        ,
+                        "duration": "4"
+                    },
+                    {
+                        "proxy": "2020-JH-130 - Construction Equipment & Supply Co."
+                        ,
+                        "duration": "4"
+                    }]
+                : await Promise.all([
+                    fetch(oppURL, oppParams).then(response => handleError(response, "Record Selector")).then(response => response.json().then(data => parseRec(data.data, "opp"))),
+                    fetch(jobURL, jobParams).then(handleError).then(response => response.json().then(data => parseRec(data.data, "job")))
+                ]).catch(error => { $("#loadScreen").modal("toggle"); modalUpdate("999", error); });
+
+            recList.length ? buildRecSelector(recList) : $("option[id]").remove();
         }
 
-        //===== Quick Base API to add records
-        function AddRecords(records, recordID, dbid) {
-            dbid ? getTempAuth(dbid, function (response) {
-                var parse = JSON.parse(response);
-                var token = parse.temporaryAuthorization;
+        //===== Build Record Selector Dropdown GTG
+        function buildRecSelector(records) {
+            $("option[id]").remove();
+            var oppGroup = $("#oppList");
+            var jobGroup = $("#jobList");
+            var oppOptions = [];
+            var jobOptions = [];
 
-                $("#loadScreen").modal("toggle");
-                var headers = {
-                    'QB-Realm-Hostname': 'domain.quickbase.com',
-                    'Authorization': 'QB-TEMP-TOKEN ' + token,
-                    'Content-Type': 'application/json'
-                }
+            for (var i = 0; i < records.length; i++) {
+                let listEL = document.createElement("option");
+                if (records[i].duration === 0) { listEL.setAttribute("class", "warning") };
+                listEL.id = records[i].proxy.split(" - ")[0];
+                listEL.innerHTML = records[i].proxy + "(" + records[i].duration + ")";
+                isOpp(listEL.id) ? oppOptions.push(listEL) : jobOptions.push(listEL);
+            }
+            oppGroup.append(oppOptions);
+            jobGroup.append(jobOptions);
+        }
 
-                var body = {
-                    "to": dbid, "data":
-                        records
-                };
+        //===== GET Opportunity Manpower weeks and totals GTG
+        function fetchData(record) {
+            let recordKey = record.toString().split(" - ")[0];
+            currRecKey = recordKey;
 
-                const xmlHttp = new XMLHttpRequest();
-                xmlHttp.open('POST', 'https://api.quickbase.com/v1/records', true);
-                for (const key in headers) {
-                    xmlHttp.setRequestHeader(key, headers[key]);
-                }
-                xmlHttp.onreadystatechange = function () {
-                    if (xmlHttp.readyState === XMLHttpRequest.DONE) {
-                        let status = xmlHttp.status;
-                        if (status === 0 || (status >= 200 && status < 400)) {
-                            modalUpdate(status, "Success", recordID); //Update status to user
-                        } else { modalUpdate(status, xmlHttp.responseText, recordID) }
+            // Lookup record
+            var keyID = isOpp(recordKey) ? "7" : "23";
+            var query = "{" + keyID + ".EX." + recordKey + "}AND{12.GTE." + today + "}";
+            var headers = {
+                'QB-Realm-Hostname': '',
+                'Authorization': 'QB-TEMP-TOKEN ' + laborToken,
+                'Content-Type': 'application/json'
+            }
+
+            var body = {
+                "from": "",
+                "select": [
+                    3,
+                    6,
+                    7,
+                    12
+                ],
+                "where": query
+            }
+
+            var params = { method: 'POST', headers: headers, "body": JSON.stringify(body) };
+
+            var URL = 'https://api.quickbase.com/v1/records/query';
+
+            inTestEnv
+                ? buildImport({
+                    "data": [
+                        {
+                            "3": {
+                                "value": 149
+                            },
+                            "6": {
+                                "value": 4
+                            },
+                            "7": {
+                                "value": "2020-JH-113"
+                            },
+                            "12": {
+                                "value": "2020-10-26"
+                            }
+                        },
+                        {
+                            "3": {
+                                "value": 150
+                            },
+                            "6": {
+                                "value": 4
+                            },
+                            "7": {
+                                "value": "2020-JH-113"
+                            },
+                            "12": {
+                                "value": "2020-11-02"
+                            }
+                        },
+                        {
+                            "3": {
+                                "value": 151
+                            },
+                            "6": {
+                                "value": 4
+                            },
+                            "7": {
+                                "value": "2020-JH-113"
+                            },
+                            "12": {
+                                "value": "2020-11-09"
+                            }
+                        },
+                        {
+                            "3": {
+                                "value": 152
+                            },
+                            "6": {
+                                "value": 5
+                            },
+                            "7": {
+                                "value": "2020-JH-113"
+                            },
+                            "12": {
+                                "value": "2020-11-16"
+                            }
+                        },
+                        {
+                            "3": {
+                                "value": 153
+                            },
+                            "6": {
+                                "value": 5
+                            },
+                            "7": {
+                                "value": "2020-JH-113"
+                            },
+                            "12": {
+                                "value": "2020-11-23"
+                            }
+                        },
+                        {
+                            "3": {
+                                "value": 154
+                            },
+                            "6": {
+                                "value": 5
+                            },
+                            "7": {
+                                "value": "2020-JH-113"
+                            },
+                            "12": {
+                                "value": "2020-11-30"
+                            }
+                        },
+                        {
+                            "3": {
+                                "value": 155
+                            },
+                            "6": {
+                                "value": 5
+                            },
+                            "7": {
+                                "value": "2020-JH-113"
+                            },
+                            "12": {
+                                "value": "2020-12-07"
+                            }
+                        },
+                        {
+                            "3": {
+                                "value": 156
+                            },
+                            "6": {
+                                "value": 5
+                            },
+                            "7": {
+                                "value": "2020-JH-113"
+                            },
+                            "12": {
+                                "value": "2020-12-14"
+                            }
+                        },
+                        {
+                            "3": {
+                                "value": 157
+                            },
+                            "6": {
+                                "value": 5
+                            },
+                            "7": {
+                                "value": "2020-JH-113"
+                            },
+                            "12": {
+                                "value": "2020-12-21"
+                            }
+                        },
+                        {
+                            "3": {
+                                "value": 158
+                            },
+                            "6": {
+                                "value": 5
+                            },
+                            "7": {
+                                "value": "2020-JH-113"
+                            },
+                            "12": {
+                                "value": "2020-12-28"
+                            }
+                        },
+                        {
+                            "3": {
+                                "value": 159
+                            },
+                            "6": {
+                                "value": 4
+                            },
+                            "7": {
+                                "value": "2020-JH-113"
+                            },
+                            "12": {
+                                "value": "2021-01-04"
+                            }
+                        },
+                        {
+                            "3": {
+                                "value": 160
+                            },
+                            "6": {
+                                "value": 4
+                            },
+                            "7": {
+                                "value": "2020-JH-113"
+                            },
+                            "12": {
+                                "value": "2021-01-11"
+                            }
+                        },
+                        {
+                            "3": {
+                                "value": 161
+                            },
+                            "6": {
+                                "value": 4
+                            },
+                            "7": {
+                                "value": "2020-JH-113"
+                            },
+                            "12": {
+                                "value": "2021-01-18"
+                            }
+                        },
+                        {
+                            "3": {
+                                "value": 162
+                            },
+                            "6": {
+                                "value": 4
+                            },
+                            "7": {
+                                "value": "2020-JH-113"
+                            },
+                            "12": {
+                                "value": "2021-01-25"
+                            }
+                        },
+                        {
+                            "3": {
+                                "value": 163
+                            },
+                            "6": {
+                                "value": 7
+                            },
+                            "7": {
+                                "value": "2020-JH-113"
+                            },
+                            "12": {
+                                "value": "2021-02-01"
+                            }
+                        },
+                        {
+                            "3": {
+                                "value": 164
+                            },
+                            "6": {
+                                "value": 7
+                            },
+                            "7": {
+                                "value": "2020-JH-113"
+                            },
+                            "12": {
+                                "value": "2021-02-08"
+                            }
+                        },
+                        {
+                            "3": {
+                                "value": 165
+                            },
+                            "6": {
+                                "value": 7
+                            },
+                            "7": {
+                                "value": "2020-JH-113"
+                            },
+                            "12": {
+                                "value": "2021-02-15"
+                            }
+                        },
+                        {
+                            "3": {
+                                "value": 166
+                            },
+                            "6": {
+                                "value": 1
+                            },
+                            "7": {
+                                "value": "2020-JH-113"
+                            },
+                            "12": {
+                                "value": "2021-02-22"
+                            }
+                        },
+                        {
+                            "3": {
+                                "value": 167
+                            },
+                            "6": {
+                                "value": 1
+                            },
+                            "7": {
+                                "value": "2020-JH-113"
+                            },
+                            "12": {
+                                "value": "2021-03-01"
+                            }
+                        },
+                        {
+                            "3": {
+                                "value": 168
+                            },
+                            "6": {
+                                "value": 1
+                            },
+                            "7": {
+                                "value": "2020-JH-113"
+                            },
+                            "12": {
+                                "value": "2021-03-08"
+                            }
+                        },
+                        {
+                            "3": {
+                                "value": 169
+                            },
+                            "6": {
+                                "value": 3
+                            },
+                            "7": {
+                                "value": "2020-JH-113"
+                            },
+                            "12": {
+                                "value": "2021-03-15"
+                            }
+                        },
+                        {
+                            "3": {
+                                "value": 170
+                            },
+                            "6": {
+                                "value": 3
+                            },
+                            "7": {
+                                "value": "2020-JH-113"
+                            },
+                            "12": {
+                                "value": "2021-03-22"
+                            }
+                        },
+                        {
+                            "3": {
+                                "value": 171
+                            },
+                            "6": {
+                                "value": 3
+                            },
+                            "7": {
+                                "value": "2020-JH-113"
+                            },
+                            "12": {
+                                "value": "2021-03-29"
+                            }
+                        }
+                    ],
+                    "fields": [
+                        {
+                            "id": 3,
+                            "label": "Record ID#",
+                            "type": "recordid"
+                        },
+                        {
+                            "id": 6,
+                            "label": "Manpower",
+                            "type": "numeric"
+                        },
+                        {
+                            "id": 7,
+                            "label": "Related Opportunity",
+                            "type": "text"
+                        },
+                        {
+                            "id": 12,
+                            "label": "Related Weekday",
+                            "type": "date"
+                        }
+                    ],
+                    "metadata": {
+                        "numFields": 4,
+                        "numRecords": 23,
+                        "skip": 0,
+                        "totalRecords": 23
                     }
-                };
-                //xmlHttp.send(JSON.stringify(body));
-            }) : alert("Error finding table. Please contact Brandon Drake \n(ext. 266)");
+                })
+                : fetch(URL, params)
+                    .then(response => response.json())
+                    .then(data => buildImport(data))
+                    .catch(e => confirm(e));
         }
 
-        //===== Disply Opp Info
-        function displayOppInfo() {
-            let hash = window.location.hash.substr(1);
-            let oppName = hash.split("_")[2];
-            let oppDesc = hash.split("_")[3];
-            let oppConstStart = hash.split("_")[1];
+        //===== Build the Import GTG
+        function buildImport(response) {
+            currWeeks = [];
+            var existingWeeks = [];
+            var data = response.data;
 
-            //Set Opp Information
-            if (oppConstStart && oppConstStart != "notSet") { $("#date_beginning").val(oppConstStart) };
-            $("#oppName").text(decodeURIComponent(oppName));
-            $("#oppDesc").text(decodeURIComponent(oppDesc));
+            if (data.length > 0) {
+
+                let startDate = data[0][12].value;
+                let endDate = data[data.length - 1][12].value;
+
+                for (var i = 0; i < data.length; i++) {
+                    let existingWeek = {};
+                    let dateBegin = data[i][12];
+                    let mpwr = data[i][6];
+                    let recID = data[i][3];
+
+                    existingWeek = { "date": dateBegin.value, "mpwr": mpwr.value, "recID": recID.value };
+                    existingWeeks.push(existingWeek);
+                }
+
+                currWeeks = existingWeeks;
+                if ($(".week").length) { clearWeeks() };
+                genWeeksBegin(startDate, endDate, existingWeeks);
+            } else { clearWeeks() }
         }
 
-        //===== Generate the weeks and manpower
-        function genWeeksBegin() {
+        //===== Generate the weeks and manpower GTG
+        function genWeeksBegin(sd, ed) {
             //Select and Format Begin/End Dates
-            let startDate = DateTime.fromISO(document.getElementById("date_beginning").value);
-            let endDate = DateTime.fromISO(document.getElementById("date_ending").value);
+            let startDate = !sd ? DateTime.fromISO(document.getElementById("date_beginning").value) : DateTime.fromISO(sd);
+            let endDate = !ed ? DateTime.fromISO(document.getElementById("date_ending").value) : DateTime.fromISO(ed);
+            lastWeekBegin = endDate;
             let weekCounter = 0;
+            let weekList = [];
+
+            $("#date_beginning").val(startDate.toISODate());
+            $("#date_ending").val(endDate.toISODate());
 
             if (checkDates(startDate, endDate)) {
                 while (startDate <= endDate) {
@@ -209,6 +807,7 @@
                     dateDisplay.innerHTML = startDate.toLocaleString();
                     dateDisplay.setAttribute("name", startDate.toISODate());
                     dateDisplay.setAttribute("for", "M" + weekCounter);
+                    currWeeks.length && weekCounter < currWeeks.length ? dateDisplay.setAttribute("data-recID", currWeeks[weekCounter].recID) : "";
                     //Manpower Element Attributes
                     let manpwrInput = document.createElement("input");
                     manpwrInput.setAttribute("class", "form-control");
@@ -224,42 +823,52 @@
                     divNode.appendChild(dateDisplay);
                     divNode.appendChild(manpwrInput);
                     divNode.appendChild(highMpwr);
-
-                    //Add to weeks
-                    document.getElementById("weeks").appendChild(divNode);
-
+                    //Generate Data array
+                    weekList.push(divNode);
                     //Increment values
                     startDate = startDate.plus({ days: 7 });
                     weekCounter++;
                 }
-
-
+                $("#weeks").prepend(weekList);
                 //Auto set manpower fields if split checkbox is checked
-                if ($("#evenSplit").is(":checked")) { setEqualMpwr(weekCounter) };
-
+                $("#evenSplit").is(":checked")
+                    ? setEqualMpwr(weekCounter)
+                    : popManpower();
                 //Display Results
                 $("#labor").removeClass("hide");
                 $("#finishBtn").removeClass("hide");
                 $("#addWeeks").addClass("hide");
-                $("#updateWeeks").addClass("hide");
-
                 //Get new totals (if any)
                 getMpwrTotal();
+                $(".week").even().css("background-color", "gainsboro");
+                $(".week input").even().css("background-color", "azure");
             };
         }
 
-        /*===== Check for valid dates
+        //===== Populates the Manpower
+        function popManpower() {
+            for (var i = 0; i < currWeeks.length; i++) {
+                $(".week").each(function () {
+                    let date = $(this).find("label").attr("name");
+                    let mpwr = $(this).find("input");
+                    if (currWeeks[i].date == date) {
+                        mpwr.val(currWeeks[i].mpwr)
+                    }
+                })
+            }
+        }
+
+        /*===== Check for valid dates GTG
             Return: Bool
+            TODO: May need to find way to edit previous dates
         */
         function checkDates(startDate, endDate) {
-            var today = new Date();
             let startDay = startDate.toLocaleString({ weekday: 'long' });
             let endDay = endDate.toLocaleString({ weekday: 'long' });
             let startIsMonday = startDay === "Monday";
             let endIsMonday = endDay === "Monday";
-            let invalidStart = startDate < today;
+            let invalidStart = startDate.toISODate() < today.toISODate();
             let invalidEnd = startDate > endDate;
-
             // Start check
             if (invalidStart && startIsMonday) {
                 $("#start span.invalidStart").length ? "" : $("#start label").append("<span class=invalidStart></span>");
@@ -288,7 +897,7 @@
                 : true //All dates valid tp proceed
         }
 
-        //===== calc, split, set manpower evenly
+        //===== calc, split, set manpower evenly GTG
         function setEqualMpwr(totalWeeks) {
             let totalMpwr = Math.round($("#totalMpwr").val());
             let weeklyMpwr = Math.floor(totalMpwr / totalWeeks);
@@ -311,33 +920,120 @@
             }
         }
 
-        //===== Generates the body of API Call
-        function genUpsert() {
-            let recordID = window.location.hash.substr(1).split("_")[0];
+        /*===== Check Record type GTG
+            Return: Bool
+        */
+        function isOpp(recID = currRecKey) {
             let re = new RegExp(/\d{4}-\w{2}-\d+/);
-            let isOpp = re.test(recordID);
+            let isOpp = re.test(recID);
+            return isOpp;
+        }
+
+        //===== Generates the body of API Call GTG
+        function genUpsert() {
             let records = [];
-            let keyField = isOpp ? "7" : "";
+            let relatedRecField = isOpp() ? "7" : "23";
             let dbid = "";
 
             $(".week").each(function (index) {
                 let date = $("#D" + index).attr("name");
                 let mpwr = Math.round($("#M" + index).val());
                 let record = {};
+                let existingId = $("#D" + index).attr("data-recid");
 
+                if (existingId) { record["3"] = { value: existingId } };
                 record["12"] = { value: date };
                 record["6"] = { value: mpwr };
-                record[keyField] = { value: recordID };
+                record[relatedRecField] = { value: currRecKey };
                 records.push(record);
             })
 
             if (!getMpwrTotal()) {
-                //window.scrollTo(0, 0);
                 $("#mpwrMismatch").removeClass("hide");
-            } else { AddRecords(records, recordID, dbid) };
+            } else if (compareUpload()) {
+                alert("No Changes Made. Nothing was uploaded");
+            } else { addRecords(records, dbid) };
         }
 
-        //===== Check Mpwr Entry for large values
+        //===== Quick Base API to add records
+        //TODO: Update to use Fecth
+        function addRecords(records, dbid) {
+            $("#loadScreen").modal("toggle");
+            inTestEnv ? $("#closeModal").removeClass("hide") : "";
+            var headers = {
+                'QB-Realm-Hostname': '',
+                'Authorization': 'QB-TEMP-TOKEN ' + laborToken,
+                'Content-Type': 'application/json'
+            }
+
+            var body = {
+                "to": dbid, "data":
+                    records
+            };
+
+            const xmlHttp = new XMLHttpRequest();
+            xmlHttp.open('POST', 'https://api.quickbase.com/v1/records', true);
+            for (const key in headers) {
+                xmlHttp.setRequestHeader(key, headers[key]);
+            }
+            xmlHttp.onreadystatechange = function () {
+                if (xmlHttp.readyState === XMLHttpRequest.DONE) {
+                    let status = xmlHttp.status;
+                    if (status === 0 || (status >= 200 && status < 400)) {
+                        tokenRuns = 0;
+                        modalUpdate(status, "Success"); //Update status to user
+                        $(".week").length < currWeeks.length ? deleteRecords() : console.log("No Deletions");
+                    } else { modalUpdate(status, xmlHttp.responseText) }
+                }
+            };
+            inTestEnv ? compareUpload() : xmlHttp.send(JSON.stringify(body));
+        }
+
+        //===== Delete Records GTG
+        function deleteRecords() {
+            var currWeeksLength = currWeeks.length;
+            var numRecToDelete = currWeeksLength - $(".week").length;
+            var where = "";
+
+            for (var i = 1; i <= numRecToDelete; i++) {
+                var recID = currWeeks[currWeeksLength - i].recID;
+                var template = "{3.EX." + recID + "}";
+                var or = "OR";
+
+                i != numRecToDelete
+                    ? where += template + or
+                    : where += template
+            }
+
+            var headers = {
+                'QB-Realm-Hostname': '',
+                'Authorization': 'QB-TEMP-TOKEN ' + laborToken,
+                'Content-Type': 'application/json'
+            }
+            var body = {
+                "from": "",
+                "where": where
+            }
+
+            console.log(JSON.stringify(body));
+
+            inTestEnv ? console.log(JSON.stringify(body)) :
+                fetch('https://api.quickbase.com/v1/records',
+                    {
+                        method: 'DELETE',
+                        headers: headers,
+                        body: JSON.stringify(body)
+                    })
+                    .then(res => {
+                        if (res.ok) {
+                            return res.json().then(res => console.log(res));
+                        }
+                        return res.json().then(resBody => Promise.reject({ status: res.status, ...resBody }));
+                    })
+                    .catch(err => console.log(err))
+        }
+
+        //===== Check Mpwr Entry for large values GTG
         function checkEntry(value, id) {
             parseInt(value) < 30
                 ? $("#" + id).siblings(".highMpwr").addClass("hide")
@@ -346,7 +1042,7 @@
             getMpwrTotal();
         }
 
-        /*===== Total Manpower
+        /*===== Total Manpower GTG
             Return: Bool
         */
         function getMpwrTotal() {
@@ -375,104 +1071,212 @@
             return mpwrRemain === 0 || mpwrNeeded <= 0;
         }
 
-        //===== Updates Labor Weeks with new data
+        //===== Compare the uploads to make sure they are not the same GTG
+        function compareUpload() {
+            let weeksToUpload = [];
+
+            $(".week").each(function () {
+                let week = {};
+                let date = $(this).find("label").attr("name");
+                let mpwr = parseInt($(this).find("input").val());
+                let recid = parseInt($(this).find("label").attr("data-recid"));
+                week = { "date": date, "mpwr": mpwr, "recID": recid };
+                weeksToUpload.push(week);
+            });
+
+            return JSON.stringify(weeksToUpload) === JSON.stringify(currWeeks);
+        }
+
+        //===== Updates Labor Weeks with new data GTG
         function updateWeeks() {
-            $(".week").remove();
-            genWeeksBegin();
-            getMpwrTotal;
+            var updatedStart = DateTime.fromISO($("#date_beginning").val());
+            var updatedEnd = DateTime.fromISO($("#date_ending").val());
+
+            if (checkDates(updatedStart, updatedEnd)) {
+                $(".week").remove();
+                $("#update").addClass("hide");
+                genWeeksBegin();
+                getMpwrTotal;
+            }
         }
 
-        //===== Display Update Weeks Button if any field changes
+        //===== Update hours
+        function updateHours() {
+            var totalWeeks = $(".week").length;
+
+            if ($("#evenSplit").is(":checked")) {
+                setEqualMpwr(totalWeeks)
+            } else {
+                $(".week input").val("");
+            }
+
+            $("#finishBtn").removeClass("hide");
+            getMpwrTotal();
+        }
+
+        //===== Display Update Weeks Button if any field changes GTG
         function showUpdate() {
-            $("#labor").addClass("hide");
             $("#finishBtn").addClass("hide");
-            $("#addWeeks").hasClass("hide") ? $("#updateWeeks").removeClass("hide") : "";
+            $("#update").removeClass("hide");
         }
 
-        //===== Clear All Data
+        //===== Clear All Data GTG
         function clearWeeks() {
             $(".week").remove();
             $("#date_beginning, #date_ending, #totalMpwr").val("");
             $("#evenSplit").prop("checked", false);
-            $("#labor, #finishBtn, #updateWeeks").addClass("hide");
+            $("#finishBtn").addClass("hide");
             $("#addWeeks").removeClass("hide");
             $("#start p.invalidStart, span.invalidEnd, span.invalidDay").remove();
             $("#end p.invalidStart, span.invalidEnd, span.invalidDay").remove();
             $("#hoursRemaining, #hours").text("");
         }
 
+        //===== Reset weeks GTG
+        function resetWeeks() {
+            var opp = $("#oppID").val();
+            $("#update").addClass("hide");
+
+            opp != "select"
+                ? fetchData(opp)
+                : alert("Nothing to reset...");
+        }
+
         //===== Updates the Modal Window to inform User of status
-        function modalUpdate(status, requestMessage, recordID) {
+        //TODO: May need to find a way to use this to reselect last uploaded and refetch data to show that the update was successful
+        function modalUpdate(status, requestMessage) {
             let message = $("#modal-message");
 
             if (typeof failCounter == 'undefined') {
                 failCounter = 0;
             }
             if (status >= 200 && status < 400) {
-                message.text("Loaded Sucessfully. Navigating to Opportunity");
-                setTimeout(3000, window.location = "/db/dbid?a=dr&key=" + recordID); //redirect to opportunity in QB
+                message.text("Uploading...");
+                setTimeout(async function () {
+                    message.text("Uploaded Sucessfully.Close to Continue, or Exit to go back to Quick Base");
+                    $("#exitModal").removeClass("hide");
+                    $("#closeModal").removeClass("hide");
+                    getRecordList();
+                    clearWeeks();
+                }, 3000);
+
+            } else if (status === "999") {
+                message.text(requestMessage);
+                $("#exitModal").removeClass("hide");
+                $("#refreshPageBtn").removeClass("hide");
             } else if (failCounter === 0) {
-                message.text("Loading Failed. Click outside this box to update or retry");
+                message.text("Upload Failed. Lets try one more time. Close and try to 'Upload Schedule' Again");
+                $("#closeModal").removeClass("hide");
                 failCounter++;
             } else {
                 message.text(requestMessage + "\nPlease take a screen shot or contact Brandon Drake \n(ext. 266)");
                 message.addClass("spaced");
                 $("#closeModal").removeClass("hide");
+                $("#exitModal").removeClass("hide");
             }
         }
 
-        //===== Navigate back when cancelled
+        //===== Navigate back when cancelled GTG
         function goBack() {
+            clearInterval(tokenUpdate);
             window.history.go(-1);
+        }
+
+        //===== Filter record results
+        function filterRecords(type) {
+            jobList = $("#jobList");
+            oppList = $("#oppList");
+
+            switch (type) {
+                case "opps":
+                    oppList.removeClass("hide");
+                    jobList.addClass("hide");
+                    break;
+                case "jobs":
+                    oppList.addClass("hide");
+                    jobList.removeClass("hide");
+                    break;
+                case "both":
+                    oppList.removeClass("hide");
+                    jobList.removeClass("hide");
+                    break;
+                default:
+            }
+        }
+
+        //===== Hide Modal Buttons
+        function hideModalButtons() {
+            $("#closeModal").addClass("hide");
+            $("#exitModal").addClass("hide");
+            $("#refreshPageBtn").addClass("hide");
         }
     </script>
 </head>
 
-<body onload="displayOppInfo()">
+<body onload="getAllTokens()">
     <div class="MainContent">
-        <!--Opp Information and Header-->
+        <!--Record Information and Header-->
         <div class="header">
             <div class="logo">
                 <h2>Janotta &amp; Herner</h2>
-                <div>
-                    <h5>Labor Projections For:</h5>
-                    <span id="oppName"></span> <br />
-                    <span id="oppDesc"></span>
+            </div>
+            <div id="lbrResults">
+                <h5 style="display:inline-block">Labor Projections For:</h5>
+                <span>
+                    <input type="radio" id="myJobs" name="searchType" value="user" onchange="getRecordList(this.value)" checked />
+                    <label for="myJobs">My Jobs/Opps</label>
+                    <input type="radio" id="allJobs" name="searchType" value="all" onchange="getRecordList(this.value)" />
+                    <label for="myJobs">All Jobs/Opps</label>
+                </span>
+                <div id="recSelector">
+                    <select id="oppID" class="selectpicker" onchange="fetchData(this.value)">
+                        <option value="select" class="hide" selected>Select One...</option>
+                        <optgroup id="oppList" label="Opportunity(Weeks)">
+                        </optgroup>
+                        <optgroup id="jobList" label="Job(Weeks)">
+                        </optgroup>
+                    </select>
+                    <span id="recordTypeSelector">
+                        <span><strong>Display Only:</strong></span>
+                        <input type="radio" id="oppsRadio" onchange="filterRecords(this.value)" name="recordType" value="opps" />
+                        <label for="oppsRadio">Opportunities</label>
+                        <input type="radio" id="jobsRadio" onchange="filterRecords(this.value)" name="recordType" value="jobs" />
+                        <label for="jobsRadio">Jobs</label>
+                        <input type="radio" id="bothRadio" onchange="filterRecords(this.value)" name="recordType" value="both" checked />
+                        <label for="bothRadio">Both</label>
+                    </span>
                 </div>
             </div>
             <!--Begin User Input and Control-->
-            <div id="start">
-                <label for="date_beginning">Date Beginning</label>
-                <input class="form-control col-md-8" onchange="showUpdate()" type="date" id="date_beginning" value="2020-10-05" /><!--value="2020-10-05"-->
-            </div>
-            <div id="end">
-                <label for="date_ending">Date Ending</label>
-                <input type="date" class="form-control col-md-8" onchange="showUpdate()" id="date_ending" value="2020-10-26" /><!--value="2020-10-26"-->
-            </div>
-            <div id="mpwr">
-                <label for="totalMpwr">Total Manpower Needed</label>
-                <input type="number" class="form-control col-md-8" id="totalMpwr" onchange="getMpwrTotal()" value="12" /><!--value="12"-->
-            </div>
-            <div id="genDatesButton">
-                <input type="checkbox" onchange="showUpdate()" id="evenSplit" />
-                <label for="evenSplit">Split Evenly</label>
-                <span id="noSplit" class="warning hide">Cannot Split to whole #'s: Enter Manually</span>
-                <div id="addWeeks">
-                    <button type="button" class="btn btn-primary" onclick="genWeeksBegin()">Generate Labor Schedule</button>
+            <div class="durationChanges">
+                <div class="staticinput" id="start">
+                    <label for="date_beginning">Date Beginning</label>
+                    <input class="form-control" onchange="showUpdate()" type="date" id="date_beginning" />
                 </div>
-                <div id="updateWeeks" class="hide">
-                    <button type="button" class="btn btn-warning" onclick="updateWeeks()">Update Labor Schedule</button>
+                <div class="staticinput" id="end">
+                    <label for="date_ending">Date Ending</label>
+                    <input type="date" class="form-control" onchange="showUpdate()" id="date_ending" />
+                </div>
+                <div class="staticinput" id="mpwr">
+                    <label for="totalMpwr">Total Manpower Needed</label>
+                    <input type="number" class="form-control" id="totalMpwr" onchange="getMpwrTotal()" />
+                </div>
+                <div class="staticinput">
+                    <input type="checkbox" onchange="showUpdate()" id="evenSplit" />
+                    <label for="evenSplit">Split Evenly</label>
+                </div>
+                <div class="staticinput" id="updateWeeks">
+                    <button id="update" type="button" class="btn btn-warning hide" onclick="updateWeeks()">Update</button>
+                    <span id="noSplit" class="warning hide">Cannot Split to whole #'s: Enter Manually</span>
                 </div>
             </div>
             <hr />
-            <h3>Week Begin</h3>
         </div>
         <!--Manpower Totals and Comparison Info-->
         <div id="labor" class="hide">
             <div id="beginDates">
                 <!--Container to place all generated weeks-->
-                <div class="col-md-8" id="weeks">
-                </div>
+                <div class="" id="weeks"></div>
             </div>
         </div>
         <!--Clear and cancel options-->
@@ -488,22 +1292,24 @@
             </div>
             <div id="footerbuttons">
                 <button id="finishBtn" type="button" class="btn btn-success hide" onclick="genUpsert()">Upload Schedule</button>
-                <button id="clearBtn" type="button" class="btn btn-warning" onclick="clearWeeks()">Clear</button>
-                <button id="cancelBtn" type="button" class="btn btn-danger" onclick="goBack()">Cancel</button>
+                <button id="clearBtn" type="button" class="btn btn-warning" onclick="resetWeeks()">Reset</button>
+                <button id="exitBtn" type="button" class="btn btn-danger" onclick="goBack()">Exit</button>
             </div>
         </div>
         <!--Modal Popup On Submission and Response-->
-        <div id="loadScreen" class="modal fade" role="dialog">
+        <div id="loadScreen" class="modal fade" role="dialog" data-backdrop="static">
             <div class="modal-dialog">
                 <div class="modal-content">
                     <div class="modal-header">
                         <h2 class="modal-title">Uploading Labor Projections</h2>
                     </div>
                     <div class="modal-body">
-                        <p id="modal-message">Loading.... Please wait.</p>
+                        <p id="modal-message">Working.... Please wait.</p>
                     </div>
                     <div class="modal-footer">
-                        <button id="closeModal" type="button" onclick="goBack()" class="btn btn-danger hide" data-dismiss="modal">Close</button>
+                        <button id="closeModal" type="button" class="btn btn-secondary hide" data-dismiss="modal" onclick="hideModalButtons()">Continue</button>
+                        <button id="refreshPageBtn" type="button" class="btn btn-primary hide" onclick="location.reload()">Refresh</button>
+                        <button id="exitModal" type="button" class="btn btn-danger hide" data-dismiss="modal" onclick="goBack()">Exit</button>
                     </div>
                 </div>
             </div>
