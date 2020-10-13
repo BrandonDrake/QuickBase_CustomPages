@@ -283,65 +283,6 @@
                     {
                         "proxy": "2020-100 - Test Job",
                         "duration": "23"
-                    },
-                    {
-                        "proxy": "2020-ST-103 -  Morel Landscaping LLC",
-                        "duration": "4"
-                    },
-                    {
-                        "proxy": "2020-ST-102 - Ohio Farmers Insurance Group"
-                        ,
-                        "duration": "4"
-                    },
-                    {
-                        "proxy": "2020-JH-147 - Adler Pelzer Group"
-                        ,
-                        "duration": "4"
-                    },
-                    {
-                        "proxy": "2020-JH-143 - Firelands Regional Medical Center"
-                        ,
-                        "duration": "4"
-                    },
-                    {
-                        "proxy": "2020-JH-142 - Firelands Regional Medical Center"
-                        ,
-                        "duration": "4"
-                    },
-                    {
-                        "proxy": "2020-JH-138 - Croghan Colonial Bank"
-                        ,
-                        "duration": "4"
-                    },
-                    {
-                        "proxy": "2020-JH-137 - NAMSA Inc."
-                        ,
-                        "duration": "4"
-                    },
-                    {
-                        "proxy": "2020-JH-136 - Norplas Industries, Inc."
-                        ,
-                        "duration": "4"
-                    },
-                    {
-                        "proxy": "2020-JH-135 - Beck Suppliers Inc."
-                        ,
-                        "duration": "4"
-                    },
-                    {
-                        "proxy": "2020-JH-134 - American Timber & Steel"
-                        ,
-                        "duration": "4"
-                    },
-                    {
-                        "proxy": "2020-JH-131 - Norplas Industries, Inc."
-                        ,
-                        "duration": "4"
-                    },
-                    {
-                        "proxy": "2020-JH-130 - Construction Equipment & Supply Co."
-                        ,
-                        "duration": "4"
                     }]
                 : await Promise.all([
                     fetch(oppURL, oppParams).then(response => handleError(response, "Record Selector")).then(response => response.json().then(data => parseRec(data.data, "opp"))),
