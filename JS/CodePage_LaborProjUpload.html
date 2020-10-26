@@ -500,7 +500,7 @@
 
                     currWeeks = existingWeeks;
                     if ($(".week").length) { clearWeeks() };
-                    genWeeksBegin(startDate, endDate, existingWeeks);
+                    genWeeksBegin(startDate, endDate);
                 } else {
                     clearWeeks();
                     constStart >= today.toISODate() ? $("#date_beginning").val(constStart) : "";
