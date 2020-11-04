@@ -18,27 +18,38 @@
     <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css"
           integrity="sha384-JcKb8q3iqJ61gNV9KGb8thSsNjpSL0n8PARn9HuZOnIxN0hoP+VmmDGMN5t9UJ0Z"
           crossorigin="anonymous">
-
     <!-- JS Source Code Begins -->
     <script>
+        //Globals
+        let DateTime = luxon.DateTime;
+        let today = DateTime.local();
+        let laborToken = "";
+        let oppToken = "";
+        let jobToken = "";
+        let errorsToken = "";
+        let tokenRuns = 0;
+        let tokenRefresh = "";
+        let currRecKey = window.location.hash ? window.location.hash.split("#")[1] : "";
+        let inTestEnv = window.location.href.startsWith("http://localhost");
+        let currType = "";
+        let recList = [];
+        let currWeeks = [];
+        let oppRecsReturned = 0;
+        let jobRecsReturned = 0;
+        let dateUpdated = false;
+
+        //Testing and Functionality Globals
+        let inSandbox = false; //If testing labor in Sanbox
+        let useJobModule = true; //Labor Projections for jobs is live
+        let useGuysPerWeek = true; //Determines type of mpwr estimate to use
+        let jhRealm = "";
+        let laborDbid = "" /* DO NOT CHANGE */
+        let laborSandboxDbid = ""; //USE SANBOXED LABOR NEEDS DBID - Can Change
+        let oppDbid = ""; /* DO NOT CHANGE */
+        let jobDbid = ""; /* DO NOT CHANGE */
+        let errorDbid = ""; /* DO NOT CHANGE */
+
         window.addEventListener('load', () => {
-            //Globals
-            let DateTime = luxon.DateTime;
-            let today = DateTime.local();
-            let laborToken = "";
-            let oppToken = "";
-            let jobToken = "";
-            let errorsToken = "";
-            let tokenRuns = 0;
-            let currRecKey = "";
-            let inTestEnv = window.location.href.startsWith("http://localhost");
-            let currWeeks = [];
-            let currType = "";
-            let recList = [];
-            let oppRecsReturned = 0;
-            let jobRecsReturned = 0;
-            let dateUpdated = false;
-            
             //===== Embed Jquery UI Calendar
             $(function () {
                 $("#datepicker").datepicker();
@@ -58,7 +69,7 @@
 
                     addRecords(body, errorsToken, errorDbid);
 
-                    if (method != "AddRecord") { throw Error(userResponse); }
+                    throw Error(userResponse);
                 }
 
                 return response;
@@ -78,11 +89,11 @@
                 }
 
                 if (inTestEnv) {
-                    getRecordList()
+                    tokenRuns === 0 ? getRecordList() : console.log(tokenRuns);
                 } else {
                     try {
                         const getTokens = [
-                            fetch('https://api.quickbase.com/v1/auth/temporary/' +  laborDbid, params), //Labor Table
+                            fetch('https://api.quickbase.com/v1/auth/temporary/' + laborDbid, params), //Labor Table
                             fetch('https://api.quickbase.com/v1/auth/temporary/' + oppDbid, params), //Opportunity Table
                             fetch('https://api.quickbase.com/v1/auth/temporary/' + jobDbid, params),  //Jobs Table
                             fetch('https://api.quickbase.com/v1/auth/temporary/' + errorDbid, params)  //Errors Table
@@ -106,9 +117,11 @@
 
                 if (tokenRuns === 0 && !inTestEnv) {
                     getRecordList() //Run initial fetch of records, other wise just update keys
-                } else if (tokenRuns < 12) {                    
+                }
+
+                if (tokenRuns < 12) {
                     tokenRuns++;
-                    setTimeout(getAllTokens, 270000); //Continue to update tokens until user is idle for too long
+                    tokenRefresh = setTimeout(getAllTokens, 270000); //Continue to update tokens until user is idle for too long
                 } else {
                     $("#resetBtn").addClass("hide");
                     $("#refreshPageBtn").removeClass("hide");
@@ -129,11 +142,11 @@
 
                 if (inTestEnv) {
                     recList = [
-                        { "proxy": "2020-ST-167:415 - Sealy Mattress Manufacturing Co. LLC:Tempur-Sealy Office Renovation", "duration": 0, "type": "opp", "constStart": "2020-12-07", "status": "A" },
-                        { "proxy": "2020-JH-134:American Timber & Steel:Building Addition", "duration": 0, "type": "opp", "constStart": "2020-09-28", "status": "B"},
-                        { "proxy": "2020-JH-175:APIO, Inc.:Platform Extention", "duration": 0, "type": "opp", "constStart": "2020-11-02", "status": "O"},
-                        { "proxy": "2019-294 - Kalahari Resorts", "duration": 2, "type": "job", "constStart": "2019-08-05"},
-                        { "proxy": "2018-391 - Nagy Family Dental Group", "duration": 11, "type": "job", "constStart": "2020-05-04"}]
+                        { "proxy": "2020-ST-167:Opportunity 1:Opp Desc1", "duration": 0, "type": "opp", "constStart": "2021-12-01", "status": "A" },
+                        { "proxy": "2020-JH-134:Opportunity 2:Opp Desc2", "duration": 0, "type": "opp", "constStart": "2021-12-01", "status": "B" },
+                        { "proxy": "2020-JH-175:Opportunity 3:Opp Desc 3", "duration": 0, "type": "opp", "constStart": "2021-12-02", "status": "O" },
+                        { "proxy": "2019-294 - Job 1", "duration": 2, "type": "job", "constStart": "2021-12-01" },
+                        { "proxy": "2018-391 - Job 2", "duration": 11, "type": "job", "constStart": "2021-05-04" }]
                     setTimeout(() => { buildRecSelector() }, 0);
                 } else {
                     getOppList();
@@ -155,7 +168,7 @@
 
 
                 let reportID = $("input[name='searchType']:checked").attr("value") === 'user' ? 68 : 76;
-                let oppURL = "https://api.quickbase.com/v1/reports/" + reportID + "/run?tableId=" + oppDbid +"&skip=";
+                let oppURL = "https://api.quickbase.com/v1/reports/" + reportID + "/run?tableId=" + oppDbid + "&skip=";
 
                 (function getOpps(url = oppURL, skip = 0) {
                     fetch(url + skip, params)
@@ -168,8 +181,8 @@
                             for (rec in data.data) {
                                 let proxyID = 253;
                                 let durationID = 235;
-                                let constStart = 255;
-                                let status = data.data[rec][14].value.split("-")[0];
+                                let constStart = 15;
+                                let status = data.data[rec][14].value.split(" ")[0];
                                 let obj = {}
                                 obj = { "proxy": data.data[rec][proxyID].value, "duration": data.data[rec][durationID].value, "type": "opp", "constStart": data.data[rec][constStart].value, "status": status };
                                 recList.push(obj);
@@ -177,7 +190,7 @@
                             return meta;
                         }).then(meta => {
                             meta.totRecs === meta.recsReturned
-                                ? getJobList()
+                                ? useJobModule ? getJobList() : buildRecSelector()
                                 : getOpps(oppURL, meta.recsReturned)
                         }).catch(err => { modalUpdate("999", err) });
                 })();
@@ -209,7 +222,7 @@
                             for (rec in data.data) {
                                 let proxyID = 185;
                                 let durationID = 512;
-                                let constStart = 514;
+                                let constStart = 49;
                                 let obj = {}
                                 obj = { "proxy": data.data[rec][proxyID].value, "duration": data.data[rec][durationID].value, "type": "job", "constStart": data.data[rec][constStart].value };
                                 recList.push(obj);
@@ -218,7 +231,7 @@
                         })
                         .then(meta => {
                             meta.totRecs === meta.recsReturned
-                                ? buildRecSelector(recList)
+                                ? buildRecSelector()
                                 : getJobs(jobURL, meta.recsReturned)
                         })
                         .catch(err => { modalUpdate("999", err) });
@@ -241,34 +254,42 @@
                     let listEL = document.createElement("option");
                     listEL.setAttribute("type", recList[i].type);
                     listEL.setAttribute("data-constStart", recList[i].constStart);
-                    listEL.id = isOpp
+                    listEL.setAttribute("class", "recOption");
+                    listEL.value = listEL.id = isOpp
                         ? recList[i].proxy.split(":")[0]
                         : recList[i].proxy.split(" - ")[0];
                     listEL.innerHTML = (isOpp
-                        ? recList[i].proxy.split(":")[1] + " - " + recList[i].proxy.split(":")[0]
-                        : recList[i].proxy) + "(" + recList[i].duration + ")";
-                    
+                        ? /*recList[i].proxy.split(":")[1] + " - " + */recList[i].proxy.split(":")[2] : recList[i].proxy) + " (Duration: " + recList[i].duration + " Wks)";
 
-                    if (recList[i].duration === 0) { listEL.setAttribute("class", "warning") };
+                    if (recList[i].duration === 0) { listEL.setAttribute("class", "noLbr") };
 
                     if (listEL.id === currRecKey) { listEL.selected = "selected" };
 
                     if (isOpp) {
-                        listEL.title = recList[i].proxy.split(":")[2];
-                        listEL.setAttribute("data-status", recList[i].status.toLowerCase())
+                        listEL.title = recList[i].status;
+                        listEL.setAttribute("data-status", recList[i].status.split("-")[0].toLowerCase())
                         oppOptions.push(listEL)
                     } else {
                         jobOptions.push(listEL);
                     }
                 }
                 oppGroup.append(oppOptions);
-                jobGroup.append(jobOptions);
+
+                useJobModule
+                    ? jobGroup.append(jobOptions)
+                    : (() => {
+                        $("#jobsRadio, #bothRadio").prop("disabled", true);
+                        $("label[for='jobsRadio'], label[for='bothRadio'").attr("title", "Coming Soon");
+                        $("#oppsRadio").prop("checked", true);
+                        $("#jobList").addClass("hide");
+                    })();
 
                 //Update UI
                 recList.length ? $("#noRecords").addClass("hide") : $("#noRecords").removeClass("hide");
                 $("#recLoad").addClass("hide");
                 $("#recSelector").removeClass("hide");
                 currRecKey ? fetchData() : $("#noRecords").removeClass("hide");
+                $("optgroup option").even().addClass("recEvenOption");
             }
 
             //===== GET Opportunity Manpower weeks and totals GTG
@@ -276,11 +297,16 @@
                 let recordKey = $("#oppID option:selected").attr("id");
                 let type = $("#oppID option:selected").attr("type");
                 let constStart = $("#oppID option:selected").attr("data-constStart");
+                location.hash ? location.hash = "" : "";
                 currRecKey = recordKey;
                 currType = type;
-                tokenRuns = 0; //User interaction, reset token runs to ensure they can keep working
+                tokenRuns = 1; //User interaction, reset token runs to 1 ensure they can keep working and not refresh the UI
 
+                //Make sure that user wants to change before upload
                 $("#labor").addClass("hide"); // HIde UI to prvent accidental changes
+                $("#numGuysPerWeek, #totalMpwr, #duration_weeks").val("");
+                $("#evenSplit").prop("checked", false);
+                $("#duration_weeks").focus();
 
                 // Lookup record
                 let keyID = type === "opp" ? "7" : "23";
@@ -298,7 +324,11 @@
                         6,
                         7,
                         12,
-                        36
+                        36,
+                        76,
+                        77,
+                        78,
+                        79
                     ],
                     "where": query
                 }
@@ -321,10 +351,22 @@
                                     "value": "2020-JH-113"
                                 },
                                 "12": {
-                                    "value": "2020-10-26"
+                                    "value": "2021-01-04"
                                 },
                                 "36": {
-                                    "value": "vacation drywall"
+                                    "value": "concrete"
+                                },
+                                "76": {
+                                    "value": ""
+                                },
+                                "77": {
+                                    "value": "concrete"
+                                },
+                                "78": {
+                                    "value": ""
+                                },
+                                "79": {
+                                    "value": ""
                                 }
                             },
                             {
@@ -338,10 +380,22 @@
                                     "value": "2020-JH-113"
                                 },
                                 "12": {
-                                    "value": "2020-11-02"
+                                    "value": "2021-01-11"
                                 },
                                 "36": {
-                                    "value": "concrete"
+                                    "value": "vacation"
+                                },
+                                "76": {
+                                    "value": "vacation"
+                                },
+                                "77": {
+                                    "value": ""
+                                },
+                                "78": {
+                                    "value": ""
+                                },
+                                "79": {
+                                    "value": ""
                                 }
                             },
                             {
@@ -355,10 +409,22 @@
                                     "value": "2020-JH-113"
                                 },
                                 "12": {
-                                    "value": "2020-11-09"
+                                    "value": "2021-01-18"
                                 },
                                 "36": {
-                                    "value": "masonry"
+                                    "value": ""
+                                },
+                                "76": {
+                                    "value": ""
+                                },
+                                "77": {
+                                    "value": ""
+                                },
+                                "78": {
+                                    "value": ""
+                                },
+                                "79": {
+                                    "value": ""
                                 }
                             },
                             {
@@ -372,10 +438,22 @@
                                     "value": "2020-JH-113"
                                 },
                                 "12": {
-                                    "value": "2020-11-16"
+                                    "value": "2021-01-25"
                                 },
                                 "36": {
-                                    "value": "vacation"
+                                    "value": ""
+                                },
+                                "76": {
+                                    "value": ""
+                                },
+                                "77": {
+                                    "value": ""
+                                },
+                                "78": {
+                                    "value": ""
+                                },
+                                "79": {
+                                    "value": ""
                                 }
                             },
                             {
@@ -389,9 +467,21 @@
                                     "value": "2020-JH-113"
                                 },
                                 "12": {
-                                    "value": "2020-11-23"
+                                    "value": "2021-02-01"
                                 },
                                 "36": {
+                                    "value": ""
+                                },
+                                "76": {
+                                    "value": ""
+                                },
+                                "77": {
+                                    "value": ""
+                                },
+                                "78": {
+                                    "value": ""
+                                },
+                                "79": {
                                     "value": ""
                                 }
                             },
@@ -406,9 +496,21 @@
                                     "value": "2020-JH-113"
                                 },
                                 "12": {
-                                    "value": "2020-11-30"
+                                    "value": "2021-02-08"
                                 },
                                 "36": {
+                                    "value": ""
+                                },
+                                "76": {
+                                    "value": ""
+                                },
+                                "77": {
+                                    "value": ""
+                                },
+                                "78": {
+                                    "value": ""
+                                },
+                                "79": {
                                     "value": ""
                                 }
                             },
@@ -423,10 +525,22 @@
                                     "value": "2020-JH-113"
                                 },
                                 "12": {
-                                    "value": "2020-12-07"
+                                    "value": "2021-02-15"
                                 },
                                 "36": {
-                                    "value": "drywall"
+                                    "value": ""
+                                },
+                                "76": {
+                                    "value": ""
+                                },
+                                "77": {
+                                    "value": ""
+                                },
+                                "78": {
+                                    "value": ""
+                                },
+                                "79": {
+                                    "value": ""
                                 }
                             }
                         ],
@@ -458,7 +572,7 @@
                             }
                         ],
                         "metadata": {
-                            "numFields": 5,
+                            "numFields": 9,
                             "numRecords": 7,
                             "skip": 0,
                             "totalRecords": 7
@@ -493,17 +607,24 @@
                         let mpwr = data[i][6].value;
                         let recID = data[i][3].value;
                         let specialtyList = data[i][36].value;
+                        let specDates = {
+                            "vaca": data[i][76].value,
+                            "concrete": data[i][77].value,
+                            "masonry": data[i][78].value,
+                            "drywall": data[i][79].value
+                        };
 
-                        existingWeek = { "date": dateBegin, "mpwr": mpwr, "recID": recID, "specialty": specialtyList };
+                        existingWeek = { "date": dateBegin, "mpwr": mpwr, "recID": recID, "specialty": specialtyList, "specDates": specDates };
                         existingWeeks.push(existingWeek);
                     }
 
                     currWeeks = existingWeeks;
                     if ($(".week").length) { clearWeeks() };
-                    genWeeksBegin(startDate, endDate);
+                    genWeeksBegin(startDate, endDate, existingWeeks);
                 } else {
                     clearWeeks();
                     constStart >= today.toISODate() ? $("#date_beginning").val(constStart) : "";
+                    getMpwrTotal();
                 }
             }
 
@@ -525,159 +646,243 @@
 
                 //Check for if rec contains specialty crew dates
                 let hasSpecialty = function (spec, specList, start) {
-                    if (specList.includes(spec.value) && start.toISODate() === currWeeks[weekCounter].date) { spec.setAttribute("checked", true) };
+                    if (specList.includes(spec.value) && start.toISODate() === currWeeks[weekCounter].date) {
+                        spec.setAttribute("checked", true);
+                        return true;
+                    } else { return false };
                 }
 
-                if (checkDates(startDate, endDate)) {
-                    $("#noRecords").addClass("hide");
-                    while (startDate <= endDate) {
-                        let dateDisplay = document.createElement("label");
-                        let manpwrInput = document.createElement("input");
-                        let specialty = document.createElement("div");
-                        let highMpwr = document.createElement("span");
-                        let weekDiv = document.createElement("div");
-                        let specList = weekCounter < currWeeks.length ? currWeeks[weekCounter].specialty : "";
+                let genDateList = function (specType, week, res) {
+                    let datesList = document.createElement("span");
+                    datesList.id = specType + "DateList" + week;
+                    datesList.setAttribute("class", "dateList");
+                    res ? datesList.setAttribute("style", "display:inline") : datesList.setAttribute("style", "display:none");
+                    let expand = document.createElement("label");
+                    expand.innerHTML = "&#9656;";
+                    expand.id = specType + "Exp" + week;
+                    expand.setAttribute("action", "exp");
+                    expand.setAttribute("class", "specDateDisplay");
+                    expand.setAttribute("title", "Show Date Box");
+                    expand.addEventListener("click", () => { $(expand).siblings().toggle(); $(expand).toggle() });
+                    let minimize = document.createElement("label");
+                    minimize.innerHTML = "&#9666;";
+                    minimize.id = specType + "Min" + week;
+                    minimize.setAttribute("style", "display:none");
+                    minimize.setAttribute("action", "min");
+                    minimize.setAttribute("class", "specDateDisplay");
+                    minimize.setAttribute("title", "Hide Date Box");
+                    minimize.addEventListener("click", () => { $(minimize).siblings().toggle(); $(minimize).toggle() })
+                    let dates = document.createElement("input");
+                    dates.setAttribute("placeholder", "ex. 1/1,3-5,7");
+                    dates.setAttribute("type", "text");
+                    dates.id = specType + "Dates" + week;
+                    dates.setAttribute("style", "display:none");
+                    dates.setAttribute("size", "10");
+                    res ? dates.value = currWeeks[week].specDates[specType] : "";
 
+                    datesList.appendChild(expand);
+                    datesList.appendChild(minimize);
+                    datesList.appendChild(dates);
 
-                        (function buildDate() {
-                            //Date Attributes
-                            dateDisplay.id = "D" + weekCounter;
-                            dateDisplay.innerHTML = startDate.toLocaleString();
-                            dateDisplay.setAttribute("class", "dateLabel");
-                            dateDisplay.setAttribute("name", startDate.toISODate());
-                            dateDisplay.setAttribute("for", "M" + weekCounter);
-                            currWeeks.length && weekCounter < currWeeks.length ? dateDisplay.setAttribute("data-recID", currWeeks[weekCounter].recID) : "";
-                        })();
+                    return datesList;
+                }
 
-                        (function buildMpwr() {
-                            //Manpower Element Attributes
-                            manpwrInput.setAttribute("class", "form-control mpwrInput");
-                            manpwrInput.type = "number";
-                            manpwrInput.id = "M" + weekCounter;
-                            manpwrInput.setAttribute("data-date", startDate.toLocaleString());
-                            manpwrInput.addEventListener("change", checkEntry);
-                            manpwrInput.addEventListener("focus", updateCalendar)
-                            highMpwr.className = "highMpwr hide warning";
-                        })();
+                try {
+                    if (checkDates(startDate, endDate)) {
+                        $("#noRecords").addClass("hide");
+                        while (startDate <= endDate) {
+                            let dateDisplay = document.createElement("label");
+                            let manpwrInput = document.createElement("input");
+                            let specialty = document.createElement("div");
+                            specialty.setAttribute("class", "specialtyselector");
+                            let specDates = document.createElement("div");
+                            let highMpwr = document.createElement("span");
+                            let weekDiv = document.createElement("div");
+                            let specList = weekCounter < currWeeks.length ? currWeeks[weekCounter].specialty : "";
 
-                        (function buildVaca() {
-                            //Specialty Selectors
-                            specialty.setAttribute("class", "specialtyselector content-center");
-                            let vacation = document.createElement("input");
-                            vacation.setAttribute("type", "checkbox");
-                            vacation.id = "vaca" + weekCounter;
-                            vacation.setAttribute("value", "vacation");
-                            vacation.setAttribute("class", "specialty");
-                            vacation.setAttribute("tabindex", "-1");
-                            vacation.setAttribute("data-toggle", "tooltip");
-                            vacation.setAttribute("data-placement", "top");
-                            vacation.setAttribute("title", "Vacation");
-                            hasSpecialty(vacation, specList, startDate);
-                            let vlabel = document.createElement("label");
-                            vlabel.setAttribute("for", "vaca" + weekCounter);
-                            vlabel.setAttribute("class", "speclabel");
-                            vlabel.innerHTML = "V |";
-                            specialty.appendChild(vacation);
-                            specialty.appendChild(vlabel);
-                        })();
+                            (function buildDate() {
+                                //Date Attributes
+                                dateDisplay.id = "D" + weekCounter;
+                                dateDisplay.innerHTML = startDate.toLocaleString();
+                                dateDisplay.setAttribute("class", "dateLabel");
+                                dateDisplay.setAttribute("name", startDate.toISODate());
+                                dateDisplay.setAttribute("for", "M" + weekCounter);
+                                currWeeks.length && weekCounter < currWeeks.length ? dateDisplay.setAttribute("data-recID", currWeeks[weekCounter].recID) : "";
+                            })();
 
-                        (function buildConcrete() {
-                            let concrete = document.createElement("input");
-                            concrete.setAttribute("type", "checkbox");
-                            concrete.id = "concrete" + weekCounter;
-                            concrete.setAttribute("value", "concrete");
-                            concrete.setAttribute("class", "specialty");
-                            concrete.setAttribute("tabindex", "-1");
-                            hasSpecialty(concrete, specList, startDate);
-                            concrete.setAttribute("data-toggle", "tooltip");
-                            concrete.setAttribute("data-placement", "top");
-                            concrete.setAttribute("title", "Concrete");
-                            let clabel = document.createElement("label");
-                            clabel.setAttribute("for", "concrete" + weekCounter);
-                            clabel.setAttribute("class", "speclabel");
-                            clabel.innerHTML = "C |";
-                            specialty.appendChild(concrete);
-                            specialty.appendChild(clabel);
-                        })();
+                            (function buildMpwr() {
+                                //Manpower Element Attributes
+                                manpwrInput.setAttribute("class", "form-control mpwrInput");
+                                manpwrInput.type = "number";
+                                manpwrInput.id = "M" + weekCounter;
+                                manpwrInput.setAttribute("data-date", startDate.toLocaleString());
+                                manpwrInput.addEventListener("change", checkEntry);
+                                manpwrInput.addEventListener("focus", updateCalendar)
+                                highMpwr.className = "highMpwr hide warning";
+                            })();
 
-                        (function buildMasonry() {
-                            let masonry = document.createElement("input");
-                            masonry.setAttribute("type", "checkbox");
-                            masonry.id = "masonry" + weekCounter;
-                            masonry.setAttribute("value", "masonry");
-                            masonry.setAttribute("class", "specialty");
-                            masonry.setAttribute("tabindex", "-1");
-                            masonry.setAttribute("data-toggle", "tooltip");
-                            masonry.setAttribute("data-placement", "top");
-                            masonry.setAttribute("title", "Masonry");
-                            hasSpecialty(masonry, specList, startDate);
-                            let mlabel = document.createElement("label");
-                            mlabel.setAttribute("for", "masonry" + weekCounter);
-                            mlabel.setAttribute("class", "speclabel");
-                            mlabel.innerHTML = "M |";
-                            specialty.appendChild(masonry);
-                            specialty.appendChild(mlabel);
-                        })();
+                            (function buildVaca() {
+                                //Specialty Selectors
+                                let v = document.createElement("span");
+                                let vacation = document.createElement("input");
+                                vacation.setAttribute("type", "checkbox");
+                                vacation.id = "vaca" + weekCounter;
+                                vacation.setAttribute("value", "vacation");
+                                vacation.setAttribute("class", "specialty");
+                                vacation.setAttribute("tabindex", "-1");
+                                vacation.setAttribute("data-toggle", "tooltip");
+                                vacation.setAttribute("data-placement", "top");
+                                vacation.setAttribute("title", "Vacation");
+                                vacation.addEventListener("change", () => $(vacation).siblings("span.dateList").toggle());
+                                let res = hasSpecialty(vacation, specList, startDate);
+                                let vlabel = document.createElement("label");
+                                vlabel.setAttribute("for", "vaca" + weekCounter);
+                                vlabel.setAttribute("class", "speclabel");
+                                vlabel.innerHTML = "V";
+                                v.appendChild(vacation);
+                                v.appendChild(vlabel);
+                                v.appendChild(genDateList("vaca", weekCounter, res));
+                                specialty.appendChild(v);
+                            })();
 
-                        (function buildDrywall() {
-                            let drywall = document.createElement("input");
-                            drywall.setAttribute("type", "checkbox");
-                            drywall.id = "drywall" + weekCounter;
-                            drywall.setAttribute("value", "drywall");
-                            drywall.setAttribute("class", "specialty");
-                            drywall.setAttribute("tabindex", "-1");
-                            drywall.setAttribute("data-toggle", "tooltip");
-                            drywall.setAttribute("data-placement", "top");
-                            drywall.setAttribute("title", "Drywall");
-                            hasSpecialty(drywall, specList, startDate);
-                            let dlabel = document.createElement("label");
-                            dlabel.setAttribute("for", "drywall" + weekCounter);
-                            dlabel.setAttribute("class", "speclabel");
-                            dlabel.innerHTML = "D";
-                            specialty.appendChild(drywall);
-                            specialty.appendChild(dlabel);
-                        })();
+                            (function buildConcrete() {
+                                let c = document.createElement("span");
+                                let concrete = document.createElement("input");
+                                concrete.setAttribute("type", "checkbox");
+                                concrete.id = "concrete" + weekCounter;
+                                concrete.setAttribute("value", "concrete");
+                                concrete.setAttribute("class", "specialty");
+                                concrete.setAttribute("tabindex", "-1");
+                                let res = hasSpecialty(concrete, specList, startDate);
+                                concrete.setAttribute("data-toggle", "tooltip");
+                                concrete.setAttribute("data-placement", "top");
+                                concrete.setAttribute("title", "Concrete");
+                                concrete.addEventListener("change", () => $(concrete).siblings("span.dateList").toggle())
+                                let clabel = document.createElement("label");
+                                clabel.setAttribute("for", "concrete" + weekCounter);
+                                clabel.setAttribute("class", "speclabel");
+                                clabel.innerHTML = "C";
+                                let cDates = document.createElement("input");
+                                cDates.setAttribute("type", "text");
+                                cDates.id = "cDates" + weekCounter;
+                                cDates.setAttribute("class", "hide");
+                                c.appendChild(concrete);
+                                c.appendChild(clabel);
+                                c.appendChild(cDates);
+                                c.appendChild(genDateList("concrete", weekCounter, res));
+                                specialty.appendChild(c);
+                            })();
 
-                        (function buildWeek() {
-                            weekDiv.setAttribute("class", "week");
-                            weekDiv.id = "W" + weekCounter;
-                            weekDiv.appendChild(dateDisplay);
-                            weekDiv.appendChild(manpwrInput);
-                            if (currType === "job") { weekDiv.appendChild(specialty) };
-                            weekDiv.appendChild(highMpwr);
-                        })();
+                            (function buildMasonry() {
+                                let m = document.createElement("span");
+                                let masonry = document.createElement("input");
+                                masonry.setAttribute("type", "checkbox");
+                                masonry.id = "masonry" + weekCounter;
+                                masonry.setAttribute("value", "masonry");
+                                masonry.setAttribute("class", "specialty");
+                                masonry.setAttribute("tabindex", "-1");
+                                masonry.setAttribute("data-toggle", "tooltip");
+                                masonry.setAttribute("data-placement", "top");
+                                masonry.setAttribute("title", "Masonry");
+                                masonry.addEventListener("change", () => $(masonry).siblings("span.dateList").toggle())
+                                let res = hasSpecialty(masonry, specList, startDate);
+                                let mlabel = document.createElement("label");
+                                mlabel.setAttribute("for", "masonry" + weekCounter);
+                                mlabel.setAttribute("class", "speclabel");
+                                mlabel.innerHTML = "M";
+                                let mDates = document.createElement("input");
+                                mDates.setAttribute("type", "text");
+                                mDates.id = "mDates" + weekCounter;
+                                mDates.setAttribute("class", "hide");
+                                m.appendChild(masonry);
+                                m.appendChild(mlabel);
+                                m.appendChild(mDates);
+                                m.appendChild(genDateList("masonry", weekCounter, res));
+                                specialty.appendChild(m);
+                            })();
 
-                        //Generate Data array
-                        weekList.push(weekDiv);
-                        //Increment values
-                        startDate = startDate.plus({ days: 7 });
-                        weekCounter++;
+                            (function buildDrywall() {
+                                let d = document.createElement("span");
+                                let drywall = document.createElement("input");
+                                drywall.setAttribute("type", "checkbox");
+                                drywall.id = "drywall" + weekCounter;
+                                drywall.setAttribute("value", "drywall");
+                                drywall.setAttribute("class", "specialty");
+                                drywall.setAttribute("tabindex", "-1");
+                                drywall.setAttribute("data-toggle", "tooltip");
+                                drywall.setAttribute("data-placement", "top");
+                                drywall.setAttribute("title", "Drywall");
+                                drywall.addEventListener("change", () => $(drywall).siblings("span.dateList").toggle())
+                                let res = hasSpecialty(drywall, specList, startDate);
+                                let dlabel = document.createElement("label");
+                                dlabel.setAttribute("for", "drywall" + weekCounter);
+                                dlabel.setAttribute("class", "speclabel");
+                                dlabel.innerHTML = "D";
+                                let dDates = document.createElement("input");
+                                dDates.setAttribute("type", "text");
+                                dDates.id = "dDates" + weekCounter;
+                                dDates.setAttribute("class", "hide");
+                                d.appendChild(drywall);
+                                d.appendChild(dlabel);
+                                d.appendChild(dDates);
+                                d.appendChild(genDateList("drywall", weekCounter, res));
+                                specialty.appendChild(d);
+                            })();
+
+                            (function buildWeek() {
+                                weekDiv.setAttribute("class", "week");
+                                weekDiv.id = "W" + weekCounter;
+                                weekDiv.appendChild(dateDisplay);
+                                weekDiv.appendChild(manpwrInput);
+                                if (currType === "job") { weekDiv.appendChild(specialty); weekDiv.appendChild(specDates) };
+                                weekDiv.appendChild(highMpwr);
+                            })();
+
+                            //Generate Data array
+                            weekList.push(weekDiv);
+                            //Increment values
+                            startDate = startDate.plus({ days: 7 });
+                            weekCounter++;
+                        }
+                        $("#weeks").prepend(weekList);
+
+                        //Auto set manpower fields if split checkbox is checked
+                        $("#evenSplit").is(":checked")
+                            ? setEqualMpwr(weekCounter)
+                            : popManpower();
+
+                        //Display Results
+                        $("#labor").removeClass("hide");
+                        $("#finishBtn").removeClass("hide");
+
+                        //Update UI
+                        $(".week").even().addClass("even");
+                        $("#we_duration").prop("checked", true);
+                        $(weekList).length
+                            ? $("#M0").focus()
+                            : $("#duration_weeks").focus();
+                        weekCounter < currWeeks.length ? $("#deleteWarning").removeClass("hide") : $("#deleteWarning").addClass("hide");
+
+                        //Get new totals (if any)
+                        getMpwrTotal();
+                        changeWkEndType();
                     }
-                    $("#weeks").prepend(weekList);
-
-                    //Auto set manpower fields if split checkbox is checked
-                    $("#evenSplit").is(":checked")
-                        ? setEqualMpwr(weekCounter)
-                        : popManpower();
-
-                    //Display Results
-                    $("#labor").removeClass("hide");
-                    $("#finishBtn").removeClass("hide");
-
-                    //Update UI
-                    $(".week").even().addClass("even");
-                    weekCounter < currWeeks.length ? $("#deleteWarning").removeClass("hide") : $("#deleteWarning").addClass("hide");
-
-                    //Get new totals (if any)
-                    getMpwrTotal();
+                } catch {
+                    modalUpdate("999", "Error Loading Week Begin Dates. Please contact Brandon Drake ext. 266.")
                 };
             }
 
             //===== Repopulates the Manpower after duration update to just fill weeks from beginnning
             function popManpower() {
                 let newDuration = $(".week").length;
+                let numGuys = parseInt($("#numGuysPerWeek").val()) ?? 0;
 
-                if (newDuration === currWeeks.length) {
+                if (numGuys > 0) {
+                    $(".week").each(function (index) {
+                        let mpwr = $(this).find(".mpwrInput");
+                        mpwr.val(numGuys);
+                    });
+                } else if (newDuration === currWeeks.length) {
                     $(".week").each(function (index) {
                         let mpwr = $(this).find(".mpwrInput");
                         mpwr.val(currWeeks[index].mpwr);
@@ -694,6 +899,8 @@
                         })
                     }
                 }
+
+                $("#preFill").prop("checked", false);
             }
 
             /**
@@ -762,161 +969,6 @@
                 }
             }
 
-            //===== Generates the body of API Call GTG
-            function genUpsert() {
-                let records = [];
-                let relatedRecField = currType === "opp" ? "7" : "23";
-
-                $(".week").each(function (index) {
-                    let date = $("#D" + index).attr("name");
-                    let mpwr = Math.round($("#M" + index).val());
-                    let record = {};
-                    let existingId = $("#D" + index).attr("data-recid");
-
-                    if (existingId) { record["3"] = { value: existingId } };
-                    record["12"] = { value: date };
-                    record["6"] = { value: mpwr };
-                    record[relatedRecField] = { value: currRecKey };
-
-                    if (currType === "job") {
-                        $("#W" + index + " .specialty").each(function () {
-                            let specType = $(this).val();
-                            if ($(this).prop("checked")) {
-                                switch (specType) {
-                                    case "vacation":
-                                        record["32"] = { "value": true };
-                                        break;
-                                    case "concrete":
-                                        record["33"] = { "value": true };
-                                        break;
-                                    case "masonry":
-                                        record["34"] = { "value": true };
-                                        break;
-                                    case "drywall":
-                                        record["35"] = { "value": true };
-                                        break;
-                                    default:
-                                        break;
-                                };
-                            } else {
-                                switch (specType) {
-                                    case "vacation":
-                                        record["32"] = { "value": false };
-                                        break;
-                                    case "concrete":
-                                        record["33"] = { "value": false };
-                                        break;
-                                    case "masonry":
-                                        record["34"] = { "value": false };
-                                        break;
-                                    case "drywall":
-                                        record["35"] = { "value": false };
-                                        break;
-                                    default:
-                                        break;
-                                };
-                            };
-                        });
-                    };
-
-                    records.push(record);
-                })
-
-                if (!getMpwrTotal()) {
-                    $("#mpwrMismatch").removeClass("hide");
-                } else if (compareUpload()) {
-                    alert("No Changes Made. Nothing was uploaded");
-                } else { addRecords(records, laborToken, laborDbid) };
-            }
-
-            /**
-             *  Quick Base API to add records
-             *
-             * @param records Json build for body of POST
-             * @param dbid the dbid to which the records will be added
-             */
-            function addRecords(records, token, dbid) {
-                let headers = {
-                    'QB-Realm-Hostname': jhRealm,
-                    'Authorization': 'QB-TEMP-TOKEN ' + token,
-                    'Content-Type': 'application/json'
-                }
-
-                let body = {
-                    "to": dbid, "data":
-                        records
-                };
-
-                if (inTestEnv) {
-                    console.log(JSON.stringify(body)) //modalUpdate("999", "Success")
-                } else {
-                    const xmlHttp = new XMLHttpRequest();
-                    xmlHttp.open('POST', 'https://api.quickbase.com/v1/records', true);
-                    for (const key in headers) {
-                        xmlHttp.setRequestHeader(key, headers[key]);
-                    }
-                    xmlHttp.onreadystatechange = function () {
-                        if (xmlHttp.readyState === XMLHttpRequest.DONE) {
-                            let status = xmlHttp.status;
-                            if (status === 0 || (status >= 200 && status < 400)) {
-                                dbid != errorDbid
-                                    ? $(".week").length < currWeeks.length
-                                        ? deleteRecords()
-                                        : modalUpdate(status, "Upload") //Update status to user
-                                    : console.log("error logged")
-                            } else {
-                                handleError(xmlHttp, "AddRecords");
-                                modalUpdate(status, xmlHttp.responseText);
-                            }
-                        }
-                    };
-
-                    xmlHttp.send(JSON.stringify(body))
-                }
-
-            }
-
-            //===== Delete Records GTG
-            function deleteRecords() {
-                let currWeeksLength = currWeeks.length;
-                let numRecToDelete = currWeeksLength - $(".week").length;
-                let where = "";
-
-                for (let i = 1; i <= numRecToDelete; i++) {
-                    let recID = currWeeks[currWeeksLength - i].recID;
-                    let template = "{3.EX." + recID + "}";
-                    let or = "OR";
-
-                    i != numRecToDelete
-                        ? where += template + or
-                        : where += template
-                }
-
-                let headers = {
-                    'QB-Realm-Hostname': jhRealm,
-                    'Authorization': 'QB-TEMP-TOKEN ' + laborToken,
-                    'Content-Type': 'application/json'
-                }
-                let body = {
-                    "from": laborDbid,
-                    "where": where
-                }
-
-                inTestEnv ? console.log(JSON.stringify(body)) :
-                    fetch('https://api.quickbase.com/v1/records',
-                        {
-                            method: 'DELETE',
-                            headers: headers,
-                            body: JSON.stringify(body)
-                        })
-                        .then(response => handleError(response, "deleteRecords"))
-                        .then(res => {
-                            return res.json().then(res => console.log(res)).then(modalUpdate("200", "Delete", numRecToDelete))
-                        })
-                        .then()
-                        .catch(err => { modalUpdate("999", err) });
-            }
-
             //===== Check Mpwr Entry for large values GTG
             function checkEntry() {
                 let value = this.value;
@@ -944,11 +996,10 @@
                     totalMpwr += mpwr;
                 });
 
-
                 //Set New Values
                 mpwrRemain = mpwrNeeded > 0 ? totalMpwr - mpwrNeeded : 0;
                 mpwrJQ.text(totalMpwr);
-                if (mpwrNeeded > 0) {
+                if (mpwrNeeded >= 0) {
                     mpwrRemain === 0
                         ? remainJQ.removeClass("mpwrMismatch").addClass("eqMpwr").text(mpwrRemain)
                         : mpwrRemain < 0
@@ -963,7 +1014,7 @@
             }
 
             /**Compare the uploads to make sure they are not the same GTG
-             * 
+             *
              * @returns Boolean to determine if the labor needs have changed to trigger the upload
              */
             function compareUpload() {
@@ -1071,7 +1122,7 @@
                 if (dateUpdated) {
                     $("#update").removeClass("hide");
                     $("#finishBtn").addClass("hide");
-                } else if ($("#evenSplit").is(':checked')) {
+                } else if ($("#evenSplit").is(':checked') || $("#numGuysPerWeek").val() != "") {
                     $("#update").removeClass("hide");
                     $("#finishBtn").addClass("hide");
                 } else {
@@ -1099,15 +1150,17 @@
                 let setByDuration = $("#wkendbyduration");
                 let setByDate = $("#wkendbydate");
                 let numWeeks = $(".week").length;
-                let type = this.value;
+                let isByDuration = $("#we_duration").is(":checked");
 
-                if (type === "byDuration") {
+                if (isByDuration) {
                     (dateDuration) != numWeeks ? $("#duration_weeks").val(dateDuration) : $("#duration_weeks").val(numWeeks);
                     setByDuration.removeClass("hide");
                     setByDate.addClass("hide");
+                    setByDuration.prop("checked", true);
                 } else {
                     setByDuration.addClass("hide");
                     setByDate.removeClass("hide");
+                    setByDate.prop("checked", true);
                 }
             }
 
@@ -1125,7 +1178,7 @@
                 $("#finishBtn").addClass("hide");
                 $("#start p.invalidStart, span.invalidEnd, span.invalidDay").remove();
                 $("#end p.invalidStart, span.invalidEnd, span.invalidDay").remove();
-                $("#hoursRemaining, #hours").text("");
+                $("#hoursRemaining, #hours").val("");
             }
 
             //===== Reset weeks GTG
@@ -1135,7 +1188,7 @@
             }
 
             /** Updates the Modal Window to inform User of status
-             * 
+             *
              * @param status Return Status of the http request
              * @param requestMessage Mesage to be displayed based on the response status
              * @param toDelete Passes in num of records to be deleted
@@ -1158,6 +1211,7 @@
                     setTimeout(function () {
                         message.text("Update Sucessful.");
                         getRecordList();
+                        $("#footerbuttons").removeClass("hide");
                         setTimeout(function () { $("#loadScreen").modal("toggle"); }, 2000)
                     }, 1000);
                 } else if (status === "401") {
@@ -1242,24 +1296,174 @@
 
             //===== Navigate to opportunity in quickbase
             function goToQuickBase() {
-                let homeUrl = "https://" + jhRealm + "/db/" + oppDbid;
-                let oppUrl  = "https://" + jhRealm + "/db/" + oppDbid + "?a=er&key=" + currRecKey;
-                let jobUrl  = "https://" + jhRealm + "/db/" + jobDbid + "?a=er&key=" + currRecKey;
-                let editUrl = currType === "opp" ? oppUrl : jobUrl;
-                let action  = this.value ?? this.id;
+                let action = this.value ?? this.id;
+                let baseURL = "https://" + jhRealm + "/db/";
+                let key = "&key=" + currRecKey;
+                let viewEdit = action === "editRec" ? "?a=er" : "?a=dr"
+                let oppUrl = baseURL + oppDbid + viewEdit + key;
+                let jobUrl = baseURL + jobDbid + viewEdit + key;
+
+                let url = currType === "opp" ? oppUrl : jobUrl;
+
 
                 inTestEnv
                     ? action === "exit"
-                        ? document.location.reload()
+                        ? clearTimeout(tokenRefresh)
                         : ""
-                    : action === "editRec"
-                        ? currRecKey && currType ? window.open(editUrl)
+                    : action !== "exit"
+                        ? currRecKey && currType ? window.open(url)
                             : ""
-                        : document.location.href = homeUrl;
+                        : document.location.href = baseURL + oppDbid;
+            }
+
+            //===== Generates the body of API Call GTG
+            function genUpsert() {
+                let records = [];
+                let relatedRecField = currType === "opp" ? "7" : "23";
+
+                $("#footerbuttons").addClass("hide");
+
+                $(".week").each(function (index) {
+                    let date = $("#D" + index).attr("name");
+                    let mpwr = Math.round($("#M" + index).val());
+                    let record = {};
+                    let existingId = $("#D" + index).attr("data-recid");
+
+                    if (existingId) { record["3"] = { value: existingId } };
+                    record["12"] = { value: date };
+                    record["6"] = { value: mpwr };
+                    record[relatedRecField] = { value: currRecKey };
+
+                    if (currType === "job") {
+                        $("#W" + index + " .specialty").each(function () {
+                            let specType = $(this).val();
+                            let isChecked = $(this).prop("checked");
+
+                            switch (specType) {
+                                case "vacation":
+                                    record["32"] = { "value": isChecked };
+                                    record["76"] = { "value": isChecked ? $("#vacaDates" + index).val() : "" }
+                                    break;
+                                case "concrete":
+                                    record["33"] = { "value": isChecked };
+                                    record["77"] = { "value": isChecked ? $("#concreteDates" + index).val() : "" }
+                                    break;
+                                case "masonry":
+                                    record["34"] = { "value": isChecked };
+                                    record["78"] = { "value": isChecked ? $("#masonryDates" + index).val() : "" }
+                                    break;
+                                case "drywall":
+                                    record["35"] = { "value": isChecked };
+                                    record["79"] = { "value": isChecked ? $("#drywallDates" + index).val() : "" }
+                                    break;
+                                default:
+                                    break;
+                            };
+                        });
+                    };
+
+                    records.push(record);
+                })
+
+                if (!getMpwrTotal()) {
+                    $("#mpwrMismatch").removeClass("hide");
+                } else if (compareUpload()) {
+                    alert("No Changes Made. Nothing was uploaded");
+                } else { addRecords(records, laborToken, laborDbid) };
+            }
+
+            /**
+             *  Quick Base API to add records
+             *
+             * @param records Json build for body of POST
+             * @param dbid the dbid to which the records will be added
+             */
+            function addRecords(records, token, dbid) {
+                let headers = {
+                    'QB-Realm-Hostname': jhRealm,
+                    'Authorization': 'QB-TEMP-TOKEN ' + token,
+                    'Content-Type': 'application/json'
+                }
+
+                let body = {
+                    "to": dbid, "data":
+                        records
+                };
+
+
+                if (inTestEnv) {
+                    console.log(JSON.stringify(body));
+                    deleteRecords();
+                    modalUpdate("200", "Success");
+                } else {
+                    const xmlHttp = new XMLHttpRequest();
+                    xmlHttp.open('POST', 'https://api.quickbase.com/v1/records', true);
+                    for (const key in headers) {
+                        xmlHttp.setRequestHeader(key, headers[key]);
+                    }
+                    xmlHttp.onreadystatechange = function () {
+                        if (xmlHttp.readyState === XMLHttpRequest.DONE) {
+                            let status = xmlHttp.status;
+                            if (status === 0 || (status >= 200 && status < 400)) {
+                                dbid != errorDbid
+                                    ? $(".week").length < currWeeks.length
+                                        ? deleteRecords()
+                                        : modalUpdate(status, "Upload") //Update status to user
+                                    : console.log("error logged")
+                            } else {
+                                modalUpdate(status, xmlHttp.responseText);
+                            }
+                        }
+                    };
+                    xmlHttp.send(JSON.stringify(body))
+                }
+            }
+
+            //===== Delete Records GTG
+            function deleteRecords() {
+                let currWeeksLength = currWeeks.length;
+                let numRecToDelete = currWeeksLength - $(".week").length;
+                let where = "";
+                let keyID = currType === "opp" ? 7 : 23;
+
+                for (let i = 1; i <= numRecToDelete; i++) {
+                    let recID = currWeeks[currWeeksLength - i].recID;
+                    let template = "({3.EX." + recID + "} AND {" + keyID + ".EX." + currRecKey + "})";
+                    let or = "OR";
+
+                    i != numRecToDelete
+                        ? where += template + or
+                        : where += template
+                }
+
+                let headers = {
+                    'QB-Realm-Hostname': jhRealm,
+                    'Authorization': 'QB-TEMP-TOKEN ' + laborToken,
+                    'Content-Type': 'application/json'
+                }
+                let body = {
+                    "from": laborDbid,
+                    "where": where
+                }
+
+                inTestEnv ? console.log(JSON.stringify(body)) :
+                    fetch('https://api.quickbase.com/v1/records',
+                        {
+                            method: 'DELETE',
+                            headers: headers,
+                            body: JSON.stringify(body)
+                        })
+                        .then(response => handleError(response, "deleteRecords"))
+                        .then(res => {
+                            return res.json().then(res => console.log(res, body)).then(modalUpdate("200", "Delete", numRecToDelete))
+                        })
+                        .then()
+                        .catch(err => { modalUpdate("999", err) });
             }
 
             (function setHandlers() {
                 //Record Selector
+                //document.getElementById("oppID").addEventListener("click", compareOnCHange); //Rec Selector
                 document.getElementById("oppID").addEventListener("change", resetWeeks); //Rec Selector
 
                 let myJobFilter = document.getElementById('myJobs'); //User filter
@@ -1270,6 +1474,7 @@
                 allJobFilter.addEventListener("click", getRecordList);
                 allJobFilter.addEventListener("click", clearWeeks);
 
+                document.getElementById("viewRec").addEventListener("click", goToQuickBase); //Edit QB anchor
                 document.getElementById("editRec").addEventListener("click", goToQuickBase); //Edit QB anchor
 
                 //Rec select display type filter
@@ -1289,15 +1494,21 @@
 
                 //Set by duration or date
                 let endType = document.getElementById("duration_weeks");
-                endType.addEventListener("click", setEndByDuration);
-                endType.addEventListener("click", showUpdate);
+                endType.addEventListener("change", setEndByDuration);
+                endType.addEventListener("change", showUpdate);
 
                 document.getElementById("we_date").addEventListener("click", changeWkEndType);
                 document.getElementById("we_duration").addEventListener("click", changeWkEndType);
 
                 //manpower
-                document.getElementById("totalMpwr").addEventListener("change", getMpwrTotal);
-                document.getElementById("evenSplit").addEventListener("click", showUpdate);
+                if (useGuysPerWeek) {
+                    $("#mpwr").addClass("hide");
+                    document.getElementById("numGuysPerWeek").addEventListener("change", showUpdate);
+                } else {
+                    $("#guysPerWeek").addClass("hide");
+                    document.getElementById("totalMpwr").addEventListener("change", getMpwrTotal);
+                    document.getElementById("evenSplit").addEventListener("click", showUpdate);
+                }
 
                 //update button
                 document.getElementById("update").addEventListener("click", updateWeeks);
@@ -1307,6 +1518,7 @@
                 document.getElementById("clearBtn").addEventListener("click", clearMpwr); //Exit app btn
                 document.getElementById("resetBtn").addEventListener("click", resetWeeks); //Exit app btn
                 document.getElementById("exitBtn").addEventListener("click", goToQuickBase); //Exit app btn
+
                 //modal
                 document.getElementById("closeModal").addEventListener("click", hideModalButtons); //Exit app btn
                 document.getElementById("refreshPageBtn").addEventListener("click", function () { location.reload() }); //Exit app btn
@@ -1315,7 +1527,6 @@
         });
     </script>
 </head>
-
 <body>
     <div class="MainContent container-fluid">
         <!--Record Information and Header-->
@@ -1328,12 +1539,12 @@
                     <div id="lbrResults">
                         <h5 style="display:inline-block">Labor Projections For:</h5>
                         <span>
-                            <input type="radio" tabindex="-1" id="myJobs" name="searchType" value="user" checked />
+                            <input type="radio" tabindex="-1" id="myJobs" name="searchType" value="user" />
                             <label for="myJobs">My Jobs/Opps</label>
-                            <input type="radio" tabindex="-1" id="allJobs" name="searchType" value="all" />
+                            <input type="radio" tabindex="-1" id="allJobs" name="searchType" value="all" checked />
                             <label for="myJobs">All Jobs/Opps</label>
                         </span>
-                        <div id="recLoad"> 
+                        <div id="recLoad">
                             <span class="loadText"> Loading record list... </span>
                             <div id="loadSpinner" class="spinner-border spinner-border-sm text-warning" role="status">
                                 <span class="sr-only">Loading...</span>
@@ -1342,31 +1553,35 @@
                         <div id="recSelector" class="hide">
                             <select id="oppID" class="selectpicker">
                                 <option value="select" class="hide" title="Select One">Select One...</option>
-                                <optgroup id="jobList" label="Job(Weeks)"></optgroup>
+                                <optgroup id="jobList" label="Job(Coming Soon)"></optgroup>
                                 <optgroup id="oppList" label="Opportunity(Weeks)">
                                 </optgroup>
                             </select>
-                            <span id="recordTypeSelector">
-                                <span><strong>Display:</strong></span>
+                            <span id="qbAction">
+                                <a href="#" id="viewRec" tabindex="-1" class="qbAction" title="View the record in Quick Base">View in QB | </a>
+                                <a href="#" id="editRec" tabindex="-1" class="qbAction" title="Edit the record in Quick Base">Edit in QB</a>
+                            </span>
+                            <div id="recordTypeSelector">
+                                <span><strong>Type:</strong></span>
                                 <input type="radio" tabindex="-1" id="oppsRadio" name="recordType" value="opps" />
                                 <label for="oppsRadio">Opportunities</label>
                                 <input type="radio" tabindex="-1" id="jobsRadio" name="recordType" value="jobs" />
                                 <label for="jobsRadio">Jobs</label>
                                 <input type="radio" tabindex="-1" id="bothRadio" name="recordType" value="both" checked />
                                 <label for="bothRadio">Both</label>
-                            </span>
+                            </div>
                             <div id="oppStatus">
+                                <span><strong>Status:</strong></span>
                                 <input type="radio" tabindex="-1" id="alist" name="oppStatus" value="a" />
                                 <label for="alist">A-List</label>
                                 <input type="radio" tabindex="-1" id="blist" name="oppStatus" value="b" />
                                 <label for="blist">B-List</label>
-                                <input type="radio" tabindex="-1" id="bidout" name="oppStatus" value="o"  />
+                                <input type="radio" tabindex="-1" id="bidout" name="oppStatus" value="o" />
                                 <label for="bidout">Bids Outstanding</label>
-                                <input type="radio" tabindex="-1" id="allBids" name="oppStatus" value="all" checked/>
+                                <input type="radio" tabindex="-1" id="allBids" name="oppStatus" value="all" checked />
                                 <label for="allBids">All Bids</label>
                             </div>
                         </div>
-                        <div id="viewOpp"><a style="color: rgb(227, 112, 39)" href="#" id="editRec" tabindex="-1">Edit QB Record</a></div>
                     </div>
                     <!--Begin User Input and Control-->
                     <div class="durationChanges row">
@@ -1383,22 +1598,23 @@
                             <input class="form-control" type="date" id="date_beginning" />
                         </div>
                         <div class="staticinput col-auto" id="wkending">
-                            <div id="wkendbydate">
+                            <div class="hide" id="wkendbydate">
                                 <label for="date_ending">Week Ending</label>
                                 <input type="date" class="form-control" id="date_ending" />
                             </div>
-                            <div class="hide" id="wkendbyduration">
+                            <div id="wkendbyduration">
                                 <label for="date_ending">Week Ending</label>
                                 <input type="number" class="form-control" id="duration_weeks" placeholder="# of Weeks" />
                             </div>
                             <span style="padding:5px">
                                 By:
-                                <input type="radio" tabindex="-1" id="we_date" name="we_type" value="byDate" checked />
+                                <input type="radio" tabindex="-1" id="we_date" name="we_type" value="byDate" />
                                 <label for="we_date">Date</label>
-                                <input type="radio" tabindex="-1" id="we_duration" name="we_type" value="byDuration" />
+                                <input type="radio" tabindex="-1" id="we_duration" name="we_type" value="byDuration" checked />
                                 <label for="we_duration">Duration</label>
                             </span>
                         </div>
+                        <!--Auto fill on Total Manpower-->
                         <div class="staticinput col-auto" id="mpwr">
                             <label for="totalMpwr">Total Manpower Needed</label>
                             <input type="number" class="form-control" id="totalMpwr" />
@@ -1407,14 +1623,21 @@
                                 <label for="evenSplit">Split Evenly</label>
                             </div>
                         </div>
-
+                        <!--Autofill based on #guys/week-->
+                        <div class="staticinput col-auto" id="guysPerWeek">
+                            <label for="numGuys"># Guys/Wk</label>
+                            <input type="number" class="form-control" id="numGuysPerWeek" />
+                        </div>
                         <div class="staticinput col-auto" id="updateWeeks">
                             <button id="update" type="button" class="btn btn-warning hide">Update</button>
                             <span id="noSplit" class="warning hide">Cannot Split to whole #'s: Enter Manually</span>
                         </div>
                     </div>
                 </div>
-                <div id="datepicker" tabindex="-1" class="col-sm-auto"></div>
+                <div>
+                    <span style="color:white; font-size:14pt" class="center">Current Week Begin Display</span>
+                    <div id="datepicker" class="col-sm-auto"></div>
+                </div>
             </div>
             <div id="deleteWarning" class="warning hide">Warning: Records will be deleted if uploaded with the current dates.</div>
         </div>

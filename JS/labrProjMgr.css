@@ -1,0 +1,181 @@
+﻿body {
+    font-size: 12px;
+}
+
+.header {
+    padding: 20px;
+    color: white;
+    background-color: rgb(0, 0, 0);
+}
+
+#labor {
+    margin: 5px;
+}
+
+.MainContent {
+    height: auto;
+    background-color: grey;
+}
+
+/*=========== Element Styles ===========*/
+/*Classes*/
+.addWeekBtn {
+    margin: 3px;
+    display: inline-block;
+    overflow: auto;
+}
+
+.datetip .datetiptext {
+    visibility: hidden;
+    width: auto;
+    background-color: gainsboro;
+    color: dodgerblue;
+    text-align: center;
+    border-radius: 6px;
+    padding: 5px;
+    /* Position the tooltip */
+    position: absolute;
+    z-index: 1;
+}
+
+.datetip:hover .datetiptext {
+    visibility: visible;
+}
+
+.durationChanges {
+    padding-bottom: 10px;
+}
+.footer {
+    padding: 10px;
+}
+
+.hide {
+    display: none !important;
+}
+
+.highMpwr::after {
+    content: " Seems High";
+    color: red;
+}
+
+.invalidEnd::after {
+    content: " *Week Ending must be after Start Date";
+    color: red;
+}
+
+.invalidStart::after {
+    content: " *Week Beging must be during or after current Week";
+    color: red;
+}
+
+.invalidDay::after {
+    content: " *Must be a Monday";
+    color: red;
+}
+
+.laborDisplay {
+    background-color: white;
+}
+
+.logo {
+    margin-bottom: 25px;
+    text-align: center;
+}
+
+    .logo h2 {
+        color: rgb(227, 112, 39);
+        font-weight: bold;
+        font-style: italic;
+    }
+
+.mpwrMismatch {
+    color: red;
+}
+
+.eqMpwr {
+    color: green;
+}
+
+.noLbr {
+    color: crimson;
+}
+
+.qbAction {
+    color: dodgerblue;
+    font-size: 10pt;
+    padding-top: 0;
+    margin-top: 0;
+}
+
+.recEvenOption {
+    background-color: rgba(176,196,222,.6);
+    margin: 0px 5px 0px 5px;
+}
+
+.spaced {
+    white-space: pre-line;
+}
+
+.specialty {
+    padding-right: 5px;
+    margin: 5px;
+    text-align: justify;
+}
+
+.specialty label {
+    margin:5px;
+    padding-right:5px;
+}
+
+.specDateDisplay {
+    margin: 0px 0px 0px 4px;
+    padding: 0;
+    font-size: 20px;
+}
+
+.specialtyselector {
+    padding: 0px 5px 0px 5px;
+}
+
+.staticinput {
+    padding-left: 3px;
+    display: inline-block;
+    color: white;
+}
+
+.warning {
+    color: red;
+}
+
+.week {
+    margin: 10px;
+    display: inline-block;
+    background-color: silver;
+    vertical-align: middle;
+    overflow: auto;
+}
+
+/*ID's*/
+#lbrResults {
+    margin-bottom: 20px;
+}
+
+#mpwrMismatch {
+    color: red;
+}
+
+#noSplit {
+    color: red;
+}
+
+#updateWeeks {
+    padding: 10px;
+}
+
+#weeks .even {
+    background-color: lightsteelblue;
+}
+
+#weeks .dateLabel {
+    margin-left: 5px;
+}
