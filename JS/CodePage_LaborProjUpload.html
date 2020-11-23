@@ -1,25 +1,37 @@
 ﻿<html lang="en" xmlns="http://www.w3.org/1999/xhtml">
 <head>
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <meta charset="utf-8" />
     <title>JH Labor Projection Manager</title>
 
     <!-- External Dependencies & CSS -->
+    <link rel="stylesheet" href="https://jhigroup.quickbase.com/db/bpmpd3j2a?a=dbpage&pageID=45" />
     <script src="https://cdn.jsdelivr.net/npm/luxon@1.24.1/build/global/luxon.min.js"></script>
     <script src="https://code.jquery.com/jquery-3.5.1.min.js"
             integrity="sha256-9/aliU8dGd2tb6OSsuzixeV4y/faTqgFtohetphbbj0="
             crossorigin="anonymous"></script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/popper.js/1.11.0/umd/popper.min.js"></script>
     <link rel="stylesheet" href="//code.jquery.com/ui/1.12.1/themes/base/jquery-ui.css">
     <script src="https://code.jquery.com/ui/1.12.1/jquery-ui.min.js"
             integrity="sha256-VazP97ZCwtekAsvgPBSUwPFKdrwD3unUfSGVYrahUqU="
             crossorigin="anonymous"></script>
-    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.min.js"></script>
+    <script src="https://maxcdn.bootstrapcdn.com/bootstrap/4.5.2/js/bootstrap.bundle.min.js"></script>
     <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css"
           integrity="sha384-JcKb8q3iqJ61gNV9KGb8thSsNjpSL0n8PARn9HuZOnIxN0hoP+VmmDGMN5t9UJ0Z"
           crossorigin="anonymous">
+
     <!-- JS Source Code Begins -->
     <script>
+        //Testing Modules and DBIDs
+        let inTestEnv = window.location.href.startsWith("http://localhost");
+        let inSandbox = false; //If testing labor in Sanbox
+        let useJobModule = window.location.href.startsWith("http://localhost"); //Labor Projections for jobs is live
+        let jhRealm = "realm.quickbase.com";
+        let laborDbid = "someDBID" /* DO NOT CHANGE */
+        let laborSandboxDbid = "someDBID"; //USE SANBOXED LABOR NEEDS DBID - Can Change
+        let oppDbid = "someDBID"; /* DO NOT CHANGE */
+        let jobDbid = "someDBID"; /* DO NOT CHANGE */
+        let errorDbid = "someDBID"; /* DO NOT CHANGE */
+
         //Globals
         let DateTime = luxon.DateTime;
         let today = DateTime.local();
@@ -29,25 +41,16 @@
         let errorsToken = "";
         let tokenRuns = 0;
         let tokenRefresh = "";
-        let currRecKey = window.location.hash ? window.location.hash.split("#")[1] : "";
-        let inTestEnv = window.location.href.startsWith("http://localhost");
+        let isDirectEdit = window.location.hash; //User Passed in a record key for direct edit
+        let currRecKey = isDirectEdit ? window.location.hash.split("#")[1] : "";
         let currType = "";
         let recList = [];
         let currWeeks = [];
         let oppRecsReturned = 0;
         let jobRecsReturned = 0;
         let dateUpdated = false;
-
-        //Testing and Functionality Globals
-        let inSandbox = false; //If testing labor in Sanbox
-        let useJobModule = true; //Labor Projections for jobs is live
-        let useGuysPerWeek = true; //Determines type of mpwr estimate to use
-        let jhRealm = "";
-        let laborDbid = "" /* DO NOT CHANGE */
-        let laborSandboxDbid = ""; //USE SANBOXED LABOR NEEDS DBID - Can Change
-        let oppDbid = ""; /* DO NOT CHANGE */
-        let jobDbid = ""; /* DO NOT CHANGE */
-        let errorDbid = ""; /* DO NOT CHANGE */
+        let changesMade = false;
+        let oppInfoUpdated = false;
 
         window.addEventListener('load', () => {
             //===== Embed Jquery UI Calendar
@@ -67,7 +70,7 @@
                     let logResponse = response.status + ": " + response.statusText + "(" + method + ")";
                     let body = [{ "6": { "value": logResponse } }];
 
-                    addRecords(body, errorsToken, errorDbid);
+                    applyUpsert(body, errorsToken, errorDbid);
 
                     throw Error(userResponse);
                 }
@@ -75,7 +78,20 @@
                 return response;
             }
 
-            //===== Obtain all initial tokens GTG
+            /**
+             * id = jqueryID incl.#
+             * action = "add" or "remove"
+             *
+             * @param id
+             * @param action
+             */
+            function jqTogHide(id, action) {
+                action === "remove"
+                    ? $(id).removeClass("hide")
+                    : $(id).addClass("hide");
+            }
+
+            //===== Obtain all initial tokens
             (async function getAllTokens() {
                 let headers = {
                     'QB-Realm-Hostname': jhRealm,
@@ -89,16 +105,16 @@
                 }
 
                 if (inTestEnv) {
-                    tokenRuns === 0 ? getRecordList() : console.log(tokenRuns);
+                    tokenRuns === 0 ? recListResetAndRun() : console.log(tokenRuns);
                 } else {
                     try {
-                        const getTokens = [
+                        const _getTokens = [
                             fetch('https://api.quickbase.com/v1/auth/temporary/' + laborDbid, params), //Labor Table
                             fetch('https://api.quickbase.com/v1/auth/temporary/' + oppDbid, params), //Opportunity Table
                             fetch('https://api.quickbase.com/v1/auth/temporary/' + jobDbid, params),  //Jobs Table
                             fetch('https://api.quickbase.com/v1/auth/temporary/' + errorDbid, params)  //Errors Table
                         ];
-                        let res = await Promise.all(getTokens);
+                        let res = await Promise.all(_getTokens);
 
                         await Promise.all(res.map(res => res.json()))
                             .then(keyArray => keyArray.map(key => key.temporaryAuthorization))
@@ -116,7 +132,7 @@
                 }
 
                 if (tokenRuns === 0 && !inTestEnv) {
-                    getRecordList() //Run initial fetch of records, other wise just update keys
+                    recListResetAndRun() //Run initial fetch of records, other wise just update keys
                 }
 
                 if (tokenRuns < 12) {
@@ -130,31 +146,39 @@
             })();
 
             //Begin generating the record list
-            function getRecordList() {
+            function recListResetAndRun() {
                 oppRecsReturned = 0;
                 jobRecsReturned = 0;
                 recList = [];
 
                 //Update UI
-                $("#recSelector").addClass("hide");
-                $("#recLoad").removeClass("hide");
+                jqTogHide("#recSelector", "add");
+                jqTogHide("#recLoad", "remove");
                 $("option[id]").remove();
 
                 if (inTestEnv) {
                     recList = [
-                        { "proxy": "2020-ST-167:Opportunity 1:Opp Desc1", "duration": 0, "type": "opp", "constStart": "2021-12-01", "status": "A" },
-                        { "proxy": "2020-JH-134:Opportunity 2:Opp Desc2", "duration": 0, "type": "opp", "constStart": "2021-12-01", "status": "B" },
-                        { "proxy": "2020-JH-175:Opportunity 3:Opp Desc 3", "duration": 0, "type": "opp", "constStart": "2021-12-02", "status": "O" },
-                        { "proxy": "2019-294 - Job 1", "duration": 2, "type": "job", "constStart": "2021-12-01" },
-                        { "proxy": "2018-391 - Job 2", "duration": 11, "type": "job", "constStart": "2021-05-04" }]
-                    setTimeout(() => { buildRecSelector() }, 0);
+                        { "proxy": "2020-ST-167:Some Opportunity 1", "duration": 0, "type": "opp", "constStart": "2021-12-01", "status": "A-List Active Bid", "probability": "10%", "oppValue": "12000", "totGuys": "0" },
+                        { "proxy": "2020-JH-134:Some Opportunity 2", "duration": 0, "type": "opp", "constStart": "2021-12-01", "status": "B-List Active Bid", "probability": "50%", "oppValue": "128000", "totGuys": "0" },
+                        { "proxy": "2020-JH-175:Some Opportunity 3", "duration": 0, "type": "opp", "constStart": "2021-12-02", "status": "O-Bid Outstanding", "probability": "90%", "oppValue": "1200000", "totGuys": "0" },
+                        { "proxy": "2019-294 - My Contracted Job 1", "duration": 2, "type": "job", "constStart": "2021-12-01" },
+                        { "proxy": "2018-391 - My COntracted Job 2", "duration": 11, "type": "job", "constStart": "2021-05-04", "constEndDate": "2021-08-04" }]
+                    setTimeout(() => { buildRecSelector() }, 1500);
                 } else {
-                    getOppList();
+                    // Check if users looking to edit record directly
+                    if (isDirectEdit) {
+                        $("#allJobs").prop("checked", true);
+                        location.hash = "";
+                        isDirectEdit = false
+                    };
+
+                    // Begin to obtain all jobs and opps
+                    getOpps();
                 }
             }
 
-            //===== GET Opportunities GTG
-            function getOppList() {
+            //===== GET Opportunities
+            function getOpps() {
                 let headers = {
                     'QB-Realm-Hostname': jhRealm,
                     'Authorization': 'QB-TEMP-TOKEN ' + oppToken,
@@ -167,7 +191,7 @@
                 };
 
 
-                let reportID = $("input[name='searchType']:checked").attr("value") === 'user' ? 68 : 76;
+                let reportID = $("input[name='searchType']:checked").attr("value") === 'user' && !isDirectEdit ? 68 : 76;
                 let oppURL = "https://api.quickbase.com/v1/reports/" + reportID + "/run?tableId=" + oppDbid + "&skip=";
 
                 (function getOpps(url = oppURL, skip = 0) {
@@ -179,24 +203,30 @@
                             oppRecsReturned += data.metadata['numRecords'];
                             meta = { "totRecs": data.metadata['totalRecords'], "recsReturned": oppRecsReturned };
                             for (rec in data.data) {
-                                let proxyID = 253;
-                                let durationID = 235;
-                                let constStart = 15;
-                                let status = data.data[rec][14].value.split(" ")[0];
-                                let obj = {}
-                                obj = { "proxy": data.data[rec][proxyID].value, "duration": data.data[rec][durationID].value, "type": "opp", "constStart": data.data[rec][constStart].value, "status": status };
+                                let obj = {};
+                                obj = {
+                                    "proxy": data.data[rec][253].value,
+                                    "duration": data.data[rec][235].value,
+                                    "type": "opp",
+                                    "constStart": data.data[rec][15].value,
+                                    "status": data.data[rec][14].value,
+                                    "probability": data.data[rec][13].value,
+                                    "oppValue": data.data[rec][12].value,
+                                    "totGuys": data.data[rec][273].value
+                                };
                                 recList.push(obj);
                             }
                             return meta;
                         }).then(meta => {
                             meta.totRecs === meta.recsReturned
-                                ? useJobModule ? getJobList() : buildRecSelector()
+                                ? useJobModule ? getJobs() : buildRecSelector()
                                 : getOpps(oppURL, meta.recsReturned)
                         }).catch(err => { modalUpdate("999", err) });
                 })();
             }
 
-            function getJobList() {
+            //===== GET Jobs List
+            function getJobs() {
                 let headers = {
                     'QB-Realm-Hostname': jhRealm,
                     'Authorization': 'QB-TEMP-TOKEN ' + jobToken,
@@ -208,7 +238,7 @@
                     'headers': headers
                 };
 
-                let reportID = $("input[name='searchType']:checked").attr("value") === 'user' ? 108 : 109;
+                let reportID = $("input[name='searchType']:checked").attr("value") === 'user' && !isDirectEdit ? 108 : 109;
                 let jobURL = "https://api.quickbase.com/v1/reports/" + reportID + "/run?tableId=" + jobDbid + "&skip=";
 
                 (function getJobs(url = jobURL, skip = 0) {
@@ -223,8 +253,9 @@
                                 let proxyID = 185;
                                 let durationID = 512;
                                 let constStart = 49;
+                                let constEnd = 50;
                                 let obj = {}
-                                obj = { "proxy": data.data[rec][proxyID].value, "duration": data.data[rec][durationID].value, "type": "job", "constStart": data.data[rec][constStart].value };
+                                obj = { "proxy": data.data[rec][proxyID].value, "duration": data.data[rec][durationID].value, "type": "job", "constStart": data.data[rec][constStart].value, "projEndDate": data.data[rec][constEnd].value };
                                 recList.push(obj);
                             }
                             return meta;
@@ -238,7 +269,7 @@
                 })();
             }
 
-            //===== Build Record Selector Dropdown GTG
+            //===== Build Record Selector Dropdown
             function buildRecSelector() {
                 let oppGroup = $("#oppList");
                 let jobGroup = $("#jobList");
@@ -253,21 +284,24 @@
 
                     let listEL = document.createElement("option");
                     listEL.setAttribute("type", recList[i].type);
-                    listEL.setAttribute("data-constStart", recList[i].constStart);
-                    listEL.setAttribute("class", "recOption");
+                    listEL.setAttribute("data-conststart", recList[i].constStart);
+                    if (!isOpp) { listEL.setAttribute("data-constenddate", recList[i].constEndDate) };
+                    listEL.setAttribute("class", "recoption");
                     listEL.value = listEL.id = isOpp
                         ? recList[i].proxy.split(":")[0]
                         : recList[i].proxy.split(" - ")[0];
                     listEL.innerHTML = (isOpp
-                        ? /*recList[i].proxy.split(":")[1] + " - " + */recList[i].proxy.split(":")[2] : recList[i].proxy) + " (Duration: " + recList[i].duration + " Wks)";
+                        ? recList[i].proxy.split(":")[2] : recList[i].proxy) + " (Duration: " + recList[i].duration + " Wks)";
 
-                    if (recList[i].duration === 0) { listEL.setAttribute("class", "noLbr") };
+                    if (recList[i].duration === 0 || recList[i].totGuys == 0) { listEL.setAttribute("class", "noLbr") };
 
                     if (listEL.id === currRecKey) { listEL.selected = "selected" };
 
                     if (isOpp) {
                         listEL.title = recList[i].status;
-                        listEL.setAttribute("data-status", recList[i].status.split("-")[0].toLowerCase())
+                        listEL.setAttribute("data-status", recList[i].status.split("-")[0].toLowerCase());
+                        listEL.setAttribute("data-probability", recList[i].probability);
+                        listEL.setAttribute("data-oppvalue", recList[i].oppValue);
                         oppOptions.push(listEL)
                     } else {
                         jobOptions.push(listEL);
@@ -281,32 +315,40 @@
                         $("#jobsRadio, #bothRadio").prop("disabled", true);
                         $("label[for='jobsRadio'], label[for='bothRadio'").attr("title", "Coming Soon");
                         $("#oppsRadio").prop("checked", true);
-                        $("#jobList").addClass("hide");
+                        jqTogHide("#jobList", "add");
                     })();
 
                 //Update UI
-                recList.length ? $("#noRecords").addClass("hide") : $("#noRecords").removeClass("hide");
-                $("#recLoad").addClass("hide");
-                $("#recSelector").removeClass("hide");
-                currRecKey ? fetchData() : $("#noRecords").removeClass("hide");
+                recList.length ? jqTogHide("#noRecords", "add") : jqTogHide("#noRecords", "remove");
+                jqTogHide("#recLoad", "add");
+                jqTogHide("#recSelector", "remove");
+                currRecKey ? fetchMpwr() : jqTogHide("#noRecords", "remove");
                 $("optgroup option").even().addClass("recEvenOption");
             }
 
-            //===== GET Opportunity Manpower weeks and totals GTG
-            function fetchData() {
-                let recordKey = $("#oppID option:selected").attr("id");
-                let type = $("#oppID option:selected").attr("type");
-                let constStart = $("#oppID option:selected").attr("data-constStart");
-                location.hash ? location.hash = "" : "";
+            //===== GET Opportunity Manpower weeks and totals
+            function fetchMpwr() {
+                let recordKey = $("#recordKey option:selected").attr("id");
+                let type = $("#recordKey option:selected").attr("type");
+                let constStart = $("#recordKey option:selected").attr("data-conststart");
+                let constEndDate = $("#recordKey option:selected").attr("data-constenddate");
+                let status = $("#recordKey option:selected").attr("title");
+                let prob = $("#recordKey option:selected").attr("data-probability");
+                let oppValue = $("#recordKey option:selected").attr("data-oppvalue");
                 currRecKey = recordKey;
                 currType = type;
+                changesMade = false;
                 tokenRuns = 1; //User interaction, reset token runs to 1 ensure they can keep working and not refresh the UI
 
                 //Make sure that user wants to change before upload
-                $("#labor").addClass("hide"); // HIde UI to prvent accidental changes
+                type === "job" ? $("#recordUpdates").addClass("hide") : $("#recordUpdates").removeClass("hide");
+                jqTogHide("#labor", "add"); // HIde UI to prvent accidental changes
                 $("#numGuysPerWeek, #totalMpwr, #duration_weeks").val("");
                 $("#evenSplit").prop("checked", false);
                 $("#duration_weeks").focus();
+                $("#bidStatus").val(status);
+                $("#probability").val(prob);
+                $("#oppValue").val(oppValue);
 
                 // Lookup record
                 let keyID = type === "opp" ? "7" : "23";
@@ -338,7 +380,7 @@
                 let URL = 'https://api.quickbase.com/v1/records/query';
 
                 inTestEnv
-                    ? buildImport({
+                    ? buildMpwrImport({ //{ "data": [] }, constStart, constEndDate)
                         "data": [
                             {
                                 "3": {
@@ -579,19 +621,19 @@
                         }
                     })
                     : fetch(URL, params)
-                        .then(response => handleError(response, "fetchData"))
+                        .then(response => handleError(response, "fetchMpwr"))
                         .then(response => response.json())
-                        .then(data => buildImport(data, constStart))
+                        .then(data => buildMpwrImport(data, constStart, constEndDate))
                         .catch(err => { modalUpdate("999", err) });
             }
 
             /**
-             * Builds the objects for each week returned from fetch GTG
+             * Builds the objects for each week returned from fetch
              *
              * @param response json from fetch
              * @param constStart QB start date for the record
              */
-            function buildImport(response, constStart) {
+            function buildMpwrImport(response, constStart, constEndDate) {
                 currWeeks = [];
                 let existingWeeks = [];
                 let data = response.data;
@@ -605,7 +647,7 @@
                         let existingWeek = {};
                         let dateBegin = data[i][12].value;
                         let mpwr = data[i][6].value;
-                        let recID = data[i][3].value;
+                        let recPK = data[i][3].value;
                         let specialtyList = data[i][36].value;
                         let specDates = {
                             "vaca": data[i][76].value,
@@ -614,7 +656,7 @@
                             "drywall": data[i][79].value
                         };
 
-                        existingWeek = { "date": dateBegin, "mpwr": mpwr, "recID": recID, "specialty": specialtyList, "specDates": specDates };
+                        existingWeek = { "date": dateBegin, "mpwr": mpwr, "recPK": recPK, "specialty": specialtyList, "specDates": specDates };
                         existingWeeks.push(existingWeek);
                     }
 
@@ -623,13 +665,18 @@
                     genWeeksBegin(startDate, endDate, existingWeeks);
                 } else {
                     clearWeeks();
-                    constStart >= today.toISODate() ? $("#date_beginning").val(constStart) : "";
+                    constStart ?? constStart >= today.toISODate()
+                        ? $("#date_beginning").val(constStart)
+                        : "";
+                    constEndDate ?? constEndDate >= today.toISODate()
+                        ? $("#date_ending").val(constEndDate)
+                        : "";
                     getMpwrTotal();
                 }
             }
 
             /**
-             *  Generate the weeks and manpower GTG
+             *  Generate the weeks and manpower
              *
              * @param sd optional start date of job or opp
              * @param ed optional end date of job or opp
@@ -641,8 +688,8 @@
                 let weekCounter = 0;
                 let weekList = [];
 
-                $("#date_beginning").val(startDate.toISODate());
-                $("#date_ending").val(endDate.toISODate());
+                if (sd) { $("#date_beginning").val(startDate.toISODate()); };
+                if (ed) { $("#date_ending").val(endDate.toISODate()); }
 
                 //Check for if rec contains specialty crew dates
                 let hasSpecialty = function (spec, specList, start) {
@@ -656,40 +703,35 @@
                     let datesList = document.createElement("span");
                     datesList.id = specType + "DateList" + week;
                     datesList.setAttribute("class", "dateList");
-                    res ? datesList.setAttribute("style", "display:inline") : datesList.setAttribute("style", "display:none");
-                    let expand = document.createElement("label");
-                    expand.innerHTML = "&#9656;";
-                    expand.id = specType + "Exp" + week;
-                    expand.setAttribute("action", "exp");
-                    expand.setAttribute("class", "specDateDisplay");
-                    expand.setAttribute("title", "Show Date Box");
-                    expand.addEventListener("click", () => { $(expand).siblings().toggle(); $(expand).toggle() });
-                    let minimize = document.createElement("label");
-                    minimize.innerHTML = "&#9666;";
-                    minimize.id = specType + "Min" + week;
-                    minimize.setAttribute("style", "display:none");
-                    minimize.setAttribute("action", "min");
-                    minimize.setAttribute("class", "specDateDisplay");
-                    minimize.setAttribute("title", "Hide Date Box");
-                    minimize.addEventListener("click", () => { $(minimize).siblings().toggle(); $(minimize).toggle() })
-                    let dates = document.createElement("input");
-                    dates.setAttribute("placeholder", "ex. 1/1,3-5,7");
-                    dates.setAttribute("type", "text");
-                    dates.id = specType + "Dates" + week;
-                    dates.setAttribute("style", "display:none");
-                    dates.setAttribute("size", "10");
-                    res ? dates.value = currWeeks[week].specDates[specType] : "";
+                    datesList.setAttribute("style", res ? "display: inline" : "display: none");
+                    let toggleDateEntry = document.createElement("label");
+                    toggleDateEntry.innerHTML = "&#9656;";
+                    toggleDateEntry.id = specType + "Exp" + week;
+                    toggleDateEntry.setAttribute("action", "exp");
+                    toggleDateEntry.setAttribute("class", "specDateDisplay");
+                    toggleDateEntry.setAttribute("style", "display: inline");
+                    toggleDateEntry.setAttribute("title", "Toggle Date Box");
+                    toggleDateEntry.addEventListener("click", () => { $(toggleDateEntry).siblings("input").toggle(); });
+                    let dateEntry = document.createElement("input");
+                    dateEntry.setAttribute("placeholder", "ex. 1/1,3-5,7");
+                    dateEntry.setAttribute("class", "dateEntry");
+                    dateEntry.setAttribute("type", "text");
+                    dateEntry.id = specType + "Dates" + week;
+                    dateEntry.setAttribute("style", "display: none");
+                    dateEntry.setAttribute("size", "10");
+                    dateEntry.addEventListener("change", () => { changesMade = true; })
+                    res ? dateEntry.value = currWeeks[week].specDates[specType] : "";
 
-                    datesList.appendChild(expand);
-                    datesList.appendChild(minimize);
-                    datesList.appendChild(dates);
+                    datesList.appendChild(toggleDateEntry);
+                    //datesList.appendChild(minimize);
+                    datesList.appendChild(dateEntry);
 
                     return datesList;
                 }
 
                 try {
                     if (checkDates(startDate, endDate)) {
-                        $("#noRecords").addClass("hide");
+                        jqTogHide("#noRecords", "add");
                         while (startDate <= endDate) {
                             let dateDisplay = document.createElement("label");
                             let manpwrInput = document.createElement("input");
@@ -697,7 +739,7 @@
                             specialty.setAttribute("class", "specialtyselector");
                             let specDates = document.createElement("div");
                             let highMpwr = document.createElement("span");
-                            let weekDiv = document.createElement("div");
+                            let weekDiv = document.createElement("span");
                             let specList = weekCounter < currWeeks.length ? currWeeks[weekCounter].specialty : "";
 
                             (function buildDate() {
@@ -707,7 +749,7 @@
                                 dateDisplay.setAttribute("class", "dateLabel");
                                 dateDisplay.setAttribute("name", startDate.toISODate());
                                 dateDisplay.setAttribute("for", "M" + weekCounter);
-                                currWeeks.length && weekCounter < currWeeks.length ? dateDisplay.setAttribute("data-recID", currWeeks[weekCounter].recID) : "";
+                                currWeeks.length && weekCounter < currWeeks.length ? dateDisplay.setAttribute("data-recPK", currWeeks[weekCounter].recPK) : "";
                             })();
 
                             (function buildMpwr() {
@@ -716,7 +758,7 @@
                                 manpwrInput.type = "number";
                                 manpwrInput.id = "M" + weekCounter;
                                 manpwrInput.setAttribute("data-date", startDate.toLocaleString());
-                                manpwrInput.addEventListener("change", checkEntry);
+                                manpwrInput.addEventListener("change", () => { changesMade = true; checkEntry });
                                 manpwrInput.addEventListener("focus", updateCalendar)
                                 highMpwr.className = "highMpwr hide warning";
                             })();
@@ -732,8 +774,16 @@
                                 vacation.setAttribute("tabindex", "-1");
                                 vacation.setAttribute("data-toggle", "tooltip");
                                 vacation.setAttribute("data-placement", "top");
+                                vacation.setAttribute("data-startMonth", startDate.toFormat("MM"));
                                 vacation.setAttribute("title", "Vacation");
-                                vacation.addEventListener("change", () => $(vacation).siblings("span.dateList").toggle());
+                                vacation.addEventListener("change", () => {
+                                    changesMade = true;
+                                    let vacaSib = $(vacation).siblings("span.dateList")
+                                    vacaSib.toggle().children("input").toggle();
+                                    let val = vacaSib.children("input.dateEntry");
+                                    val.focus();
+                                    val.val() === "" ? val.val($(vacation).attr("data-startMonth") + "/") : val.val();
+                                });
                                 let res = hasSpecialty(vacation, specList, startDate);
                                 let vlabel = document.createElement("label");
                                 vlabel.setAttribute("for", "vaca" + weekCounter);
@@ -756,8 +806,16 @@
                                 let res = hasSpecialty(concrete, specList, startDate);
                                 concrete.setAttribute("data-toggle", "tooltip");
                                 concrete.setAttribute("data-placement", "top");
+                                concrete.setAttribute("data-startMonth", startDate.toFormat("MM"));
                                 concrete.setAttribute("title", "Concrete");
-                                concrete.addEventListener("change", () => $(concrete).siblings("span.dateList").toggle())
+                                concrete.addEventListener("change", () => {
+                                    changesMade = true;
+                                    let concSib = $(concrete).siblings("span.dateList")
+                                    concSib.toggle().children("input").toggle();
+                                    let val = concSib.children("input.dateEntry");
+                                    val.focus();
+                                    val.val() === "" ? val.val($(concrete).attr("data-startMonth") + "/") : val.val();
+                                });
                                 let clabel = document.createElement("label");
                                 clabel.setAttribute("for", "concrete" + weekCounter);
                                 clabel.setAttribute("class", "speclabel");
@@ -783,8 +841,16 @@
                                 masonry.setAttribute("tabindex", "-1");
                                 masonry.setAttribute("data-toggle", "tooltip");
                                 masonry.setAttribute("data-placement", "top");
+                                masonry.setAttribute("data-startMonth", startDate.toFormat("MM"));
                                 masonry.setAttribute("title", "Masonry");
-                                masonry.addEventListener("change", () => $(masonry).siblings("span.dateList").toggle())
+                                masonry.addEventListener("change", () => {
+                                    changesMade = true;
+                                    let masonSib = $(masonry).siblings("span.dateList")
+                                    masonSib.toggle().children("input").toggle();
+                                    let val = masonSib.children("input.dateEntry");
+                                    val.focus();
+                                    val.val() === "" ? val.val($(masonry).attr("data-startMonth") + "/") : val.val();
+                                });
                                 let res = hasSpecialty(masonry, specList, startDate);
                                 let mlabel = document.createElement("label");
                                 mlabel.setAttribute("for", "masonry" + weekCounter);
@@ -811,8 +877,16 @@
                                 drywall.setAttribute("tabindex", "-1");
                                 drywall.setAttribute("data-toggle", "tooltip");
                                 drywall.setAttribute("data-placement", "top");
+                                drywall.setAttribute("data-startMonth", startDate.toFormat("MM"));
                                 drywall.setAttribute("title", "Drywall");
-                                drywall.addEventListener("change", () => $(drywall).siblings("span.dateList").toggle())
+                                drywall.addEventListener("change", () => {
+                                    changesMade = true;
+                                    let drySib = $(drywall).siblings("span.dateList")
+                                    drySib.toggle().children("input").toggle();
+                                    let val = drySib.children("input.dateEntry");
+                                    val.focus();
+                                    val.val() === "" ? val.val($(drywall).attr("data-startMonth") + "/") : val.val();
+                                });
                                 let res = hasSpecialty(drywall, specList, startDate);
                                 let dlabel = document.createElement("label");
                                 dlabel.setAttribute("for", "drywall" + weekCounter);
@@ -847,13 +921,12 @@
                         $("#weeks").prepend(weekList);
 
                         //Auto set manpower fields if split checkbox is checked
-                        $("#evenSplit").is(":checked")
-                            ? setEqualMpwr(weekCounter)
-                            : popManpower();
+                        popManpower();
 
                         //Display Results
-                        $("#labor").removeClass("hide");
-                        $("#finishBtn").removeClass("hide");
+                        jqTogHide("#labor", "remove");
+                        $("#finishBtn").prop("disabled", false);
+                        $("#finishBtn").attr("title", "Upload to QB");
 
                         //Update UI
                         $(".week").even().addClass("even");
@@ -861,7 +934,7 @@
                         $(weekList).length
                             ? $("#M0").focus()
                             : $("#duration_weeks").focus();
-                        weekCounter < currWeeks.length ? $("#deleteWarning").removeClass("hide") : $("#deleteWarning").addClass("hide");
+                        weekCounter < currWeeks.length ? jqTogHide("#deleteWarning", "remove") : jqTogHide("#deleteWarning", "add");
 
                         //Get new totals (if any)
                         getMpwrTotal();
@@ -875,9 +948,9 @@
             //===== Repopulates the Manpower after duration update to just fill weeks from beginnning
             function popManpower() {
                 let newDuration = $(".week").length;
-                let numGuys = parseInt($("#numGuysPerWeek").val()) ?? 0;
+                let numGuys = parseInt($("#numGuysPerWeek").val()) ?? null;
 
-                if (numGuys > 0) {
+                if (numGuys >= 0) {
                     $(".week").each(function (index) {
                         let mpwr = $(this).find(".mpwrInput");
                         mpwr.val(numGuys);
@@ -941,35 +1014,7 @@
                 $("#datepicker").datepicker("setDate", date);
             }
 
-            /**
-             * calc, split, set manpower evenly as possible GTG
-             *
-             * @param totalWeeks total number of weeks for the record
-             */
-            function setEqualMpwr(totalWeeks) {
-                let totalMpwr = Math.abs(Math.round($("#totalMpwr").val()));
-                let weeklyMpwr = Math.floor(totalMpwr / totalWeeks);
-                let remainder = totalMpwr % totalWeeks;
-
-                if (totalMpwr >= totalWeeks) {
-                    for (let i = 0; i < totalWeeks; i++) {
-                        let week = $("#M" + i);
-                        //week.attr("readonly", true);
-                        //distribute remainder to keep manpower relatively equal
-                        if (remainder > 0) {
-                            week.val(weeklyMpwr + 1);
-                            remainder--;
-                        } else { week.val(weeklyMpwr); }
-                    }
-                    $("#evenSplit").prop("checked", false);
-                } else {
-                    $("#noSplit").removeClass("hide");
-                    setTimeout(function () { $("#noSplit").addClass("hide"); }, 5000);
-                    $("#evenSplit").prop("checked", false);
-                }
-            }
-
-            //===== Check Mpwr Entry for large values GTG
+            //===== Check Mpwr Entry for large values
             function checkEntry() {
                 let value = this.value;
                 let id = this.id;
@@ -980,16 +1025,10 @@
                 getMpwrTotal();
             }
 
-            /*===== Total Manpower GTG
-                Return: Bool
-            */
+            //===== Calculate Total Manpower
             function getMpwrTotal() {
-                let mpwrNeeded = Math.abs(Math.round($("#totalMpwr").val()));
                 let totalMpwr = 0;
-                let mpwrRemain = 0;
                 let mpwrJQ = $("#hours");
-                let remainJQ = $("#hoursRemaining");
-
 
                 $(".week").each(function (index) {
                     let mpwr = Math.round($("#M" + index).val());
@@ -997,50 +1036,10 @@
                 });
 
                 //Set New Values
-                mpwrRemain = mpwrNeeded > 0 ? totalMpwr - mpwrNeeded : 0;
                 mpwrJQ.text(totalMpwr);
-                if (mpwrNeeded >= 0) {
-                    mpwrRemain === 0
-                        ? remainJQ.removeClass("mpwrMismatch").addClass("eqMpwr").text(mpwrRemain)
-                        : mpwrRemain < 0
-                            ? remainJQ.removeClass("eqMpwr").addClass("mpwrMismatch").text(Math.abs(mpwrRemain) + " Remain")
-                            : remainJQ.removeClass("eqMpwr").addClass("mpwrMismatch").text(mpwrRemain + " Over")
-                };
-
-                //UI Clean-up
-                if (!$("#mpwrMismatch").hasClass("hide")) { $("#mpwrMismatch").addClass("hide") };
-
-                return mpwrRemain === 0 || mpwrNeeded <= 0;
             }
 
-            /**Compare the uploads to make sure they are not the same GTG
-             *
-             * @returns Boolean to determine if the labor needs have changed to trigger the upload
-             */
-            function compareUpload() {
-                let weeksToUpload = [];
-
-                $(".week").each(function (index) {
-                    let week = {};
-                    let date = $(this).find("label").attr("name");
-                    let mpwr = parseInt($(this).find("input").val());
-                    let recid = parseInt($(this).find("label").attr("data-recid"));
-                    let specList = "";
-
-                    $("#W" + index + " .specialty").each(function () {
-                        $(this).prop("checked")
-                            ? specList += $(this).val() + " "
-                            : ""
-                    });
-
-                    week = { "date": date, "mpwr": mpwr, "recID": recid, "specialty": specList.trim() };
-                    weeksToUpload.push(week);
-                });
-
-                return JSON.stringify(weeksToUpload) === JSON.stringify(currWeeks);
-            }
-
-            //===== Updates Labor Weeks with new data GTG
+            //===== Updates Labor Weeks with new data
             function updateWeeks() {
                 let updatedStart = DateTime.fromISO($("#date_beginning").val());
                 let updatedEnd = DateTime.fromISO($("#date_ending").val());
@@ -1106,28 +1105,37 @@
 
                 if (checkDates(updatedStart, updatedEnd)) {
                     $(".week").remove();
-                    $("#update").addClass("hide");
+                    $("#update").prop("disabled", true);
                     genWeeksBegin();
                     getMpwrTotal();
                 }
             }
 
-            //===== Display Update Weeks Button if any field changes GTG
-            function showUpdate() {
-                let startMatch = currWeeks.length ? $("#date_beginning").val() === currWeeks[0].date : false;
-                let endMatch = currWeeks.length ? $("#date_ending").val() === currWeeks[currWeeks.length - 1].date : false;
+            //===== Display Update Weeks Button if any field changes
+            function requireUpdate() {
+                let totWeeks = $(".week").length;
+                let userDuration = parseInt($("#duration_weeks").val())
+                let currStart = $("#D0").attr("name");
+                let currEnd = $("#D" + (totWeeks - 1)).attr("name");
+                let startMatch = $("#date_beginning").val() === currStart;
+                let endMatch = $("#date_ending").val() === currEnd;
+                let durationMatch = userDuration === totWeeks;
+                changesMade = true;
 
-                dateUpdated = !startMatch || !endMatch;
+                dateUpdated = !startMatch || !endMatch || !durationMatch;
 
                 if (dateUpdated) {
-                    $("#update").removeClass("hide");
-                    $("#finishBtn").addClass("hide");
-                } else if ($("#evenSplit").is(':checked') || $("#numGuysPerWeek").val() != "") {
-                    $("#update").removeClass("hide");
-                    $("#finishBtn").addClass("hide");
+                    $("#update").prop("disabled", false);
+                    $("#finishBtn").prop("disabled", true);
+                    $("#finishBtn").attr("title", "Update Required for Upload");
+                } else if ($("#numGuysPerWeek").val() != "" || totWeeks !== $(".week").length) {
+                    $("#update").prop("disabled", false);
+                    $("#finishBtn").prop("disabled", true);
+                    $("#finishBtn").attr("title", "Update Required for Upload");
                 } else {
-                    $("#update").addClass("hide");
-                    $("#finishBtn").removeClass("hide");
+                    $("#update").prop("disabled", true);
+                    $("#finishBtn").prop("disabled", false);
+                    $("#finishBtn").attr("title", "Upload to QB");
                 }
             }
 
@@ -1167,24 +1175,26 @@
             //===== Clear manpower totals
             function clearMpwr() {
                 $(".week .mpwrInput").val("");
+                $("#M0").focus();
                 getMpwrTotal();
             }
 
-            //===== Clear All Data GTG
+            //===== Clear All Data
             function clearWeeks() {
                 $(".week").remove();
                 $("#date_beginning, #date_ending, #totalMpwr").val("");
                 $("#evenSplit").prop("checked", false);
-                $("#finishBtn").addClass("hide");
+                $("#finishBtn").prop("disabled", true);
+                $("#finishBtn").attr("title", "Update Required for Upload");
                 $("#start p.invalidStart, span.invalidEnd, span.invalidDay").remove();
                 $("#end p.invalidStart, span.invalidEnd, span.invalidDay").remove();
                 $("#hoursRemaining, #hours").val("");
             }
 
-            //===== Reset weeks GTG
+            //===== Reset weeks
             function resetWeeks() {
-                $("#update").addClass("hide");
-                fetchData()
+                $("#update").prop("disabled", true);
+                fetchMpwr()
             }
 
             /** Updates the Modal Window to inform User of status
@@ -1209,10 +1219,14 @@
                     title.text("Updating Labor Projections");
                     message.text(messageText);
                     setTimeout(function () {
+                        if (!inTestEnv) {
+                            let labrReport = window.open("https://jhigroup.quickbase.com/db/bqssicnr2?a=td", "com.jhigroup.LaborScheduler");
+                            labrReport.location.reload()
+                        };
                         message.text("Update Sucessful.");
-                        getRecordList();
-                        $("#footerbuttons").removeClass("hide");
-                        setTimeout(function () { $("#loadScreen").modal("toggle"); }, 2000)
+                        recListResetAndRun();
+                        jqTogHide("#footerbuttons", "remove");
+                        setTimeout(function () { $("#loadScreen").modal("toggle"); }, 500)
                     }, 1000);
                 } else if (status === "401") {
                     title.text("Error");
@@ -1225,19 +1239,19 @@
                 } else if (status === "999") {
                     title.text("Error")
                     message.text(requestMessage);
-                    $("#exitModal").removeClass("hide");
-                    $("#refreshPageBtn").removeClass("hide");
+                    jqTogHide("#exitModal", "remove");
+                    jqTogHide("#refreshPageBtn", "remove");
                 } else if (failCounter === 0) {
                     title.text("Unsuccessful Upload")
                     message.text("Upload Failed. Lets try one more time. Close and try to 'Upload Schedule' Again");
-                    $("#closeModal").removeClass("hide");
+                    jqTogHide("#closeModal", "remove");
                     failCounter++;
                 } else {
                     title.text("Upload Failed");
                     message.text(requestMessage + "\nPlease take a screen shot or contact Brandon Drake \n(ext. 266)");
                     message.addClass("spaced");
-                    $("#closeModal").removeClass("hide");
-                    $("#exitModal").removeClass("hide");
+                    jqTogHide("#closeModal", "remove");
+                    jqTogHide("#exitModal", "remove");
                 }
             }
 
@@ -1272,8 +1286,6 @@
                 let selection = this.value;
                 let options = $("#oppList option");
 
-                console.log(selection);
-
                 if (selection === "all") {
                     options.removeClass("hide");
                 } else {
@@ -1289,9 +1301,9 @@
 
             //===== Hide Modal Buttons
             function hideModalButtons() {
-                $("#closeModal").addClass("hide");
-                $("#exitModal").addClass("hide");
-                $("#refreshPageBtn").addClass("hide");
+                jqTogHide("#closeModal", "add");
+                jqTogHide("#exitModal", "add");
+                jqTogHide("#refreshPageBtn", "add");
             }
 
             //===== Navigate to opportunity in quickbase
@@ -1313,26 +1325,24 @@
                     : action !== "exit"
                         ? currRecKey && currType ? window.open(url)
                             : ""
-                        : document.location.href = baseURL + oppDbid;
+                        : document.location.href = baseURL + laborDbid;
             }
 
-            //===== Generates the body of API Call GTG
+            //===== Generates the body of API Call
             function genUpsert() {
                 let records = [];
                 let relatedRecField = currType === "opp" ? "7" : "23";
-
-                $("#footerbuttons").addClass("hide");
 
                 $(".week").each(function (index) {
                     let date = $("#D" + index).attr("name");
                     let mpwr = Math.round($("#M" + index).val());
                     let record = {};
-                    let existingId = $("#D" + index).attr("data-recid");
+                    let existingId = $("#D" + index).attr("data-recPK");
 
                     if (existingId) { record["3"] = { value: existingId } };
+                    record[relatedRecField] = { value: currRecKey };
                     record["12"] = { value: date };
                     record["6"] = { value: mpwr };
-                    record[relatedRecField] = { value: currRecKey };
 
                     if (currType === "job") {
                         $("#W" + index + " .specialty").each(function () {
@@ -1365,11 +1375,15 @@
                     records.push(record);
                 })
 
-                if (!getMpwrTotal()) {
-                    $("#mpwrMismatch").removeClass("hide");
-                } else if (compareUpload()) {
-                    alert("No Changes Made. Nothing was uploaded");
-                } else { addRecords(records, laborToken, laborDbid) };
+                if (!changesMade && !oppInfoUpdated) {
+                    alert("No changes made. Nothing to upload.");
+                } else {
+                    jqTogHide("#footerbuttons", "add");
+                    applyUpsert(records, laborToken, laborDbid);
+                    if (oppInfoUpdated) {
+                        updateOpportunity();
+                    }
+                }
             }
 
             /**
@@ -1378,7 +1392,7 @@
              * @param records Json build for body of POST
              * @param dbid the dbid to which the records will be added
              */
-            function addRecords(records, token, dbid) {
+            function applyUpsert(records, token, dbid) {
                 let headers = {
                     'QB-Realm-Hostname': jhRealm,
                     'Authorization': 'QB-TEMP-TOKEN ' + token,
@@ -1393,8 +1407,7 @@
 
                 if (inTestEnv) {
                     console.log(JSON.stringify(body));
-                    deleteRecords();
-                    modalUpdate("200", "Success");
+                    modalUpdate("200", "Success")
                 } else {
                     const xmlHttp = new XMLHttpRequest();
                     xmlHttp.open('POST', 'https://api.quickbase.com/v1/records', true);
@@ -1419,7 +1432,68 @@
                 }
             }
 
-            //===== Delete Records GTG
+            // Update Opportunity Record Information
+            function updateOpportunity() {
+                let status = $("#bidStatus option:selected").val();
+                let prob = $("#probability option:selected").val();
+                let contractVal = Math.abs(parseInt($("#oppValue").val()));
+                let currStart = $("#D0").attr("name");
+
+                let headers = {
+                    'QB-Realm-Hostname': jhRealm,
+                    'Authorization': 'QB-TEMP-TOKEN ' + currType === "opp" ? oppToken : jobToken,
+                    'Content-Type': 'application/json'
+                }
+
+                let oppBody = {
+                    "to": oppDbid, "data":
+                        [{
+                            "93": {
+                                "value": currRecKey
+                            },
+                            "12": {
+                                "value": contractVal
+                            },
+                            "13": {
+                                "value": prob
+                            },
+                            "14": {
+                                "value": status
+                            },
+                            "15": {
+                                "value": currStart
+                            }
+                        }]
+                };
+
+                let jobBody = {
+                    "to": jobDbid, "data":
+                        [{
+
+                        }]
+                };
+
+                let bodyToUse = currType === "opp" ? oppBody : jobBody;
+
+                let params = {
+                    'method': 'POST',
+                    'headers': headers,
+                    'body': JSON.stringify(bodyToUse)
+                };
+
+                !inTestEnv
+                    ? fetch('https://api.quickbase.com/v1/records', params)
+                        .then(res => {
+                            if (res.ok) {
+                                return res.json().then(res => console.log(res));
+                            }
+                            return res.json().then(resBody => Promise.reject({ status: res.status, ...resBody }));
+                        })
+                        .catch(err => console.log(err))
+                    : console.log(JSON.stringify(body));
+            }
+
+            //===== Delete Records
             function deleteRecords() {
                 let currWeeksLength = currWeeks.length;
                 let numRecToDelete = currWeeksLength - $(".week").length;
@@ -1427,8 +1501,8 @@
                 let keyID = currType === "opp" ? 7 : 23;
 
                 for (let i = 1; i <= numRecToDelete; i++) {
-                    let recID = currWeeks[currWeeksLength - i].recID;
-                    let template = "({3.EX." + recID + "} AND {" + keyID + ".EX." + currRecKey + "})";
+                    let recPK = currWeeks[currWeeksLength - i].recPK;
+                    let template = "({3.EX." + recPK + "} AND {" + keyID + ".EX." + currRecKey + "})";
                     let or = "OR";
 
                     i != numRecToDelete
@@ -1463,15 +1537,14 @@
 
             (function setHandlers() {
                 //Record Selector
-                //document.getElementById("oppID").addEventListener("click", compareOnCHange); //Rec Selector
-                document.getElementById("oppID").addEventListener("change", resetWeeks); //Rec Selector
+                document.getElementById("recordKey").addEventListener("change", resetWeeks); //Rec Selector
 
                 let myJobFilter = document.getElementById('myJobs'); //User filter
-                myJobFilter.addEventListener("click", getRecordList);
+                myJobFilter.addEventListener("click", recListResetAndRun);
                 myJobFilter.addEventListener("click", clearWeeks);
 
                 let allJobFilter = document.getElementById("allJobs"); //all Jobs filter
-                allJobFilter.addEventListener("click", getRecordList);
+                allJobFilter.addEventListener("click", recListResetAndRun);
                 allJobFilter.addEventListener("click", clearWeeks);
 
                 document.getElementById("viewRec").addEventListener("click", goToQuickBase); //Edit QB anchor
@@ -1488,27 +1561,26 @@
 
                 //Start_End Dates
                 let db = document.getElementById('date_beginning');
-                db.addEventListener("change", showUpdate);
                 db.addEventListener("change", setEndByDuration);
-                document.getElementById("date_ending").addEventListener("change", showUpdate)
+                db.addEventListener("change", requireUpdate);
+                db.addEventListener("change", () => { oppInfoUpdated = true });
+                document.getElementById("date_ending").addEventListener("change", requireUpdate)
 
                 //Set by duration or date
                 let endType = document.getElementById("duration_weeks");
                 endType.addEventListener("change", setEndByDuration);
-                endType.addEventListener("change", showUpdate);
+                endType.addEventListener("change", requireUpdate);
 
                 document.getElementById("we_date").addEventListener("click", changeWkEndType);
                 document.getElementById("we_duration").addEventListener("click", changeWkEndType);
 
                 //manpower
-                if (useGuysPerWeek) {
-                    $("#mpwr").addClass("hide");
-                    document.getElementById("numGuysPerWeek").addEventListener("change", showUpdate);
-                } else {
-                    $("#guysPerWeek").addClass("hide");
-                    document.getElementById("totalMpwr").addEventListener("change", getMpwrTotal);
-                    document.getElementById("evenSplit").addEventListener("click", showUpdate);
-                }
+                document.getElementById("numGuysPerWeek").addEventListener("change", requireUpdate);
+
+                //Opportunity
+                document.getElementById("bidStatus").addEventListener("change", () => { oppInfoUpdated = true });
+                document.getElementById("probability").addEventListener("change", () => { oppInfoUpdated = true });
+                document.getElementById("oppValue").addEventListener("change", () => { oppInfoUpdated = true });
 
                 //update button
                 document.getElementById("update").addEventListener("click", updateWeeks);
@@ -1518,6 +1590,7 @@
                 document.getElementById("clearBtn").addEventListener("click", clearMpwr); //Exit app btn
                 document.getElementById("resetBtn").addEventListener("click", resetWeeks); //Exit app btn
                 document.getElementById("exitBtn").addEventListener("click", goToQuickBase); //Exit app btn
+                document.getElementById("collapseHeader").addEventListener("click", () => $("#dataManipulation").toggle());
 
                 //modal
                 document.getElementById("closeModal").addEventListener("click", hideModalButtons); //Exit app btn
@@ -1531,115 +1604,153 @@
     <div class="MainContent container-fluid">
         <!--Record Information and Header-->
         <div class="header sticky-top">
-            <div class="row justify-content-between">
-                <div class="col-6-auto">
-                    <div class="logo">
-                        <h2>Janotta &amp; Herner</h2>
-                    </div>
+            <div class="logo">
+                <h2>Janotta &amp; Herner: Labor Projection Manager</h2>
+            </div>
+            <div class="search">
+                <div id="recSearch">
                     <div id="lbrResults">
-                        <h5 style="display:inline-block">Labor Projections For:</h5>
-                        <span>
-                            <input type="radio" tabindex="-1" id="myJobs" name="searchType" value="user" />
+                        <h6 style="display:inline-block">Show:</h6>
+                        <div>
+                            <input type="radio" tabindex="-1" id="myJobs" name="searchType" value="user" checked />
                             <label for="myJobs">My Jobs/Opps</label>
-                            <input type="radio" tabindex="-1" id="allJobs" name="searchType" value="all" checked />
-                            <label for="myJobs">All Jobs/Opps</label>
-                        </span>
-                        <div id="recLoad">
-                            <span class="loadText"> Loading record list... </span>
-                            <div id="loadSpinner" class="spinner-border spinner-border-sm text-warning" role="status">
-                                <span class="sr-only">Loading...</span>
+                            <input type="radio" tabindex="-1" id="allJobs" name="searchType" value="all" />
+                            <label for="allJobs">All Jobs/Opps</label>
+                        </div>
+                        <div>
+                            <div class="filter"><h6>Filter By:</h6></div>
+                            <div class="filter">
+                                <div id="recordTypeSelector">
+                                    <span>Types:</span>
+                                    <input type="radio" tabindex="-1" id="oppsRadio" name="recordType" value="opps" checked />
+                                    <label for="oppsRadio">Opportunities</label>
+                                    <input type="radio" tabindex="-1" id="jobsRadio" name="recordType" value="jobs" />
+                                    <label for="jobsRadio">Jobs</label>
+                                    <input type="radio" tabindex="-1" id="bothRadio" name="recordType" value="both" />
+                                    <label for="bothRadio">Both</label>
+                                </div>
+                                <div id="oppStatus">
+                                    <span>Status:</span>
+                                    <input type="radio" tabindex="-1" id="alist" name="oppStatus" value="a" />
+                                    <label for="alist">A-List</label>
+                                    <input type="radio" tabindex="-1" id="blist" name="oppStatus" value="b" />
+                                    <label for="blist">B-List</label>
+                                    <input type="radio" tabindex="-1" id="bidout" name="oppStatus" value="o" />
+                                    <label for="bidout">Bids Outstanding</label>
+                                    <input type="radio" tabindex="-1" id="allBids" name="oppStatus" value="all" checked />
+                                    <label for="allBids">All Bids</label>
+                                </div>
                             </div>
                         </div>
+                    </div>
+                    <div id="recLoad">
+                        <span class="loadText"> Loading record list... </span>
+                        <div id="loadSpinner" class="spinner-border spinner-border-sm text-warning" role="status">
+                            <span class="sr-only">Loading...</span>
+                        </div>
+                    </div>
+                    <div class="recordSelection">
                         <div id="recSelector" class="hide">
-                            <select id="oppID" class="selectpicker">
+                            <select class="custom-select mr-1" id="recordKey">
                                 <option value="select" class="hide" title="Select One">Select One...</option>
                                 <optgroup id="jobList" label="Job(Coming Soon)"></optgroup>
                                 <optgroup id="oppList" label="Opportunity(Weeks)">
                                 </optgroup>
                             </select>
-                            <span id="qbAction">
-                                <a href="#" id="viewRec" tabindex="-1" class="qbAction" title="View the record in Quick Base">View in QB | </a>
-                                <a href="#" id="editRec" tabindex="-1" class="qbAction" title="Edit the record in Quick Base">Edit in QB</a>
-                            </span>
-                            <div id="recordTypeSelector">
-                                <span><strong>Type:</strong></span>
-                                <input type="radio" tabindex="-1" id="oppsRadio" name="recordType" value="opps" />
-                                <label for="oppsRadio">Opportunities</label>
-                                <input type="radio" tabindex="-1" id="jobsRadio" name="recordType" value="jobs" />
-                                <label for="jobsRadio">Jobs</label>
-                                <input type="radio" tabindex="-1" id="bothRadio" name="recordType" value="both" checked />
-                                <label for="bothRadio">Both</label>
-                            </div>
-                            <div id="oppStatus">
-                                <span><strong>Status:</strong></span>
-                                <input type="radio" tabindex="-1" id="alist" name="oppStatus" value="a" />
-                                <label for="alist">A-List</label>
-                                <input type="radio" tabindex="-1" id="blist" name="oppStatus" value="b" />
-                                <label for="blist">B-List</label>
-                                <input type="radio" tabindex="-1" id="bidout" name="oppStatus" value="o" />
-                                <label for="bidout">Bids Outstanding</label>
-                                <input type="radio" tabindex="-1" id="allBids" name="oppStatus" value="all" checked />
-                                <label for="allBids">All Bids</label>
-                            </div>
                         </div>
-                    </div>
-                    <!--Begin User Input and Control-->
-                    <div class="durationChanges row">
-                        <div class="staticinput col-auto" id="start">
-                            <label class="datetip" for="date_beginning">
-                                Week Beginning &#10068;
-                                <span class="datetiptext row col-xlg">
-                                    When selecting dates, if the date chosen is not a "Monday", <br />
-                                    the date will automatically be changed to the Monday of that week. <br />
-                                    If the date chosen is a "Sunday", the date will be changed to the <br />
-                                    following Monday (i.e. the next day).
-                                </span>
-                            </label>
-                            <input class="form-control" type="date" id="date_beginning" />
-                        </div>
-                        <div class="staticinput col-auto" id="wkending">
-                            <div class="hide" id="wkendbydate">
-                                <label for="date_ending">Week Ending</label>
-                                <input type="date" class="form-control" id="date_ending" />
-                            </div>
-                            <div id="wkendbyduration">
-                                <label for="date_ending">Week Ending</label>
-                                <input type="number" class="form-control" id="duration_weeks" placeholder="# of Weeks" />
-                            </div>
-                            <span style="padding:5px">
-                                By:
-                                <input type="radio" tabindex="-1" id="we_date" name="we_type" value="byDate" />
-                                <label for="we_date">Date</label>
-                                <input type="radio" tabindex="-1" id="we_duration" name="we_type" value="byDuration" checked />
-                                <label for="we_duration">Duration</label>
-                            </span>
-                        </div>
-                        <!--Auto fill on Total Manpower-->
-                        <div class="staticinput col-auto" id="mpwr">
-                            <label for="totalMpwr">Total Manpower Needed</label>
-                            <input type="number" class="form-control" id="totalMpwr" />
-                            <div class="staticinput">
-                                <input type="checkbox" tabindex="-1" id="evenSplit" />
-                                <label for="evenSplit">Split Evenly</label>
-                            </div>
-                        </div>
-                        <!--Autofill based on #guys/week-->
-                        <div class="staticinput col-auto" id="guysPerWeek">
-                            <label for="numGuys"># Guys/Wk</label>
-                            <input type="number" class="form-control" id="numGuysPerWeek" />
-                        </div>
-                        <div class="staticinput col-auto" id="updateWeeks">
-                            <button id="update" type="button" class="btn btn-warning hide">Update</button>
-                            <span id="noSplit" class="warning hide">Cannot Split to whole #'s: Enter Manually</span>
+                        <div>
+                            <a href="#" id="viewRec" tabindex="-1" class="qbAction" title="View the record in Quick Base">View in QB</a> |
+                            <a href="#" id="editRec" tabindex="-1" class="qbAction" title="Edit the record in Quick Base">Edit in QB</a>
                         </div>
                     </div>
                 </div>
-                <div>
-                    <span style="color:white; font-size:14pt" class="center">Current Week Begin Display</span>
-                    <div id="datepicker" class="col-sm-auto"></div>
+                <div id="calender">
+                    <div id="datepicker"></div>
+                </div>
+            </div>
+            <!--Begin User Input and Control-->
+            <div id="dataManipulation">
+                <div class="userUpdate hide" id="recordUpdates">
+                    <h5>Opportunity Data</h5>
+                    <div class="laborData" id="statusEdit">
+                        <label for="bidStatus">Status</label>
+                        <div>
+                            <select class="custom-select" id="bidStatus">
+                                <option value="A-List Active Bid">A-List Active Bid</option>
+                                <option value="B-List Active Bid">B-List Active Bid</option>
+                                <option value="O-Bid Outstanding">O-Bid Outstanding</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="laborData">
+                        <label for="probability">Probability</label>
+                        <div>
+                            <select class="custom-select" id="probability">
+                                <option value="0%">0%</option>
+                                <option value="5%">5%</option>
+                                <option value="10%">10%</option>
+                                <option value="20%">20%</option>
+                                <option value="30%">30%</option>
+                                <option value="40%">40%</option>
+                                <option value="50%">50%</option>
+                                <option value="60%">60%</option>
+                                <option value="70%">70%</option>
+                                <option value="80%">80%</option>
+                                <option value="90%">90%</option>
+                                <option value="100%">100%</option>
+                            </select>
+                        </div>
+                    </div>
+                    <div class="laborData" id="oppValueEdit">
+                        <label for="oppValue">Opportunity Value</label>
+                        <div>
+                            <input type="number" class="form-control" id="oppValue" />
+                        </div>
+                    </div>
+                </div>
+                <div class="userUpdate" id="durationChanges">
+                    <h5>Labor Data</h5>
+                    <div class="laborData" id="start">
+                        <label class="datetip" for="date_beginning">
+                            Week Beginning &#10068;
+                            <span class="datetiptext">
+                                When selecting dates, if the date chosen is not a "Monday", <br />
+                                the date will automatically be changed to the Monday of that week. <br />
+                                If the date chosen is a "Sunday", the date will be changed to the <br />
+                                following Monday (i.e. the next day).
+                            </span>
+                        </label>
+                        <input class="form-control" type="date" id="date_beginning" />
+                    </div>
+                    <div class="laborData" id="wkending">
+                        <div class="hide" id="wkendbydate">
+                            <label for="date_ending">Duration</label>
+                            <input type="date" class="form-control" id="date_ending" />
+                        </div>
+                        <div id="wkendbyduration">
+                            <label for="date_ending">Duration</label>
+                            <input type="number" class="form-control" id="duration_weeks" placeholder="# of Weeks" />
+                        </div>
+                        <div style="padding:5px">
+                            By:
+                            <input type="radio" tabindex="-1" id="we_date" name="we_type" value="byDate" />
+                            <label for="we_date">Date</label>
+                            <input type="radio" tabindex="-1" id="we_duration" name="we_type" value="byDuration" checked />
+                            <label for="we_duration"># Weeks</label>
+                        </div>
+                    </div>
+                    <!--Autofill based on #guys/week-->
+                    <div class="laborData" id="guysPerWeek">
+                        <label for="numGuys"># Guys/Wk</label>
+                        <input type="number" class="form-control" id="numGuysPerWeek" />
+                    </div>
+                    <div class="laborUpdate" id="updateWeeks">
+                        <button id="update" type="button" class="btn btn-warning btn-sm" disabled>Update</button>
+                    </div>
                 </div>
             </div>
             <div id="deleteWarning" class="warning hide">Warning: Records will be deleted if uploaded with the current dates.</div>
+            <div title="Collapse/Expand" class="headerToggle" id="collapseHeader"><label>&#8597;</label></div>
         </div>
         <!--Manpower Totals and Comparison Info-->
         <div class="laborDisplay">
@@ -1656,15 +1767,9 @@
                     <div class="row">
                         <div class="col">Total Mpwr : <span class="col-2" id="hours"></span></div>
                     </div>
-                    <div class="row">
-                        <div class="col">Over/Under: <span class="col-2" id="hoursRemaining"></span></div>
-                    </div>
-                    <div id="mpwrMismatch" class="warning hide">
-                        <span>Manpower totals do not match</span>
-                    </div>
                 </div>
                 <div id="footerbuttons">
-                    <button id="finishBtn" type="button" class="btn btn-success hide" title="Upload to QB">Upload Schedule</button>
+                    <button id="finishBtn" type="button" class="btn btn-success" title="Select Record First" disabled>Upload Schedule</button>
                     <button id="clearBtn" type="button" class="btn btn-secondary" title="Clear Manpower in each week">Clear Manpower</button>
                     <button id="resetBtn" type="button" class="btn btn-warning" title="Resets back to current state in QB">Reset</button>
                     <button id="exitBtn" type="button" class="btn btn-danger" title="Exit back to QB" value="exit">Exit</button>
